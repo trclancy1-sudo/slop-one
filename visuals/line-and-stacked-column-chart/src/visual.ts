@@ -127,7 +127,7 @@ export class Visual implements IVisual {
 
     // Animation state tracking
     private isFirstRender = true;
-    private previousCategoryKey = "";
+    private previousCategories: Set<string> = new Set();
     private previousValueKey = "";
     private previousHighlightKey = "";
 
@@ -170,8 +170,19 @@ export class Visual implements IVisual {
      * Determine which animation style to use for this update.
      * Returns the user-chosen style from settings, or "none" for non-data updates.
      */
+    /**
+     * Check if one set is a subset of another.
+     */
+    private static isSubset(a: Set<string>, b: Set<string>): boolean {
+        for (const item of a) {
+            if (!b.has(item)) return false;
+        }
+        return true;
+    }
+
     private resolveAnimationStyle(
-        updateType: VisualUpdateType, categoryKey: string, valueKey: string, highlightKey: string
+        updateType: VisualUpdateType, currentCategories: Set<string>,
+        valueKey: string, highlightKey: string
     ): AnimationStyle {
         const entrStyle = (this.formattingSettings.animationCard.entranceStyle.value?.value || "growUp") as AnimationStyle;
         const cfStyle = (this.formattingSettings.animationCard.crossFilterStyle.value?.value || "spring") as AnimationStyle;
@@ -181,10 +192,21 @@ export class Visual implements IVisual {
         const isDataUpdate = (updateType & VisualUpdateType.Data) !== 0;
         if (!isDataUpdate) return "none";
 
-        if (categoryKey !== this.previousCategoryKey) return entrStyle;
-        // Cross-filter: highlights changed (another visual filtered this one)
+        // Highlights changed → cross-filter (highlight mode)
         if (highlightKey !== this.previousHighlightKey) return cfStyle;
-        // Values changed (e.g. new measure added)
+
+        // Check if categories changed
+        const prev = this.previousCategories;
+        const sameCategories = currentCategories.size === prev.size && Visual.isSubset(currentCategories, prev);
+
+        if (!sameCategories) {
+            // If new categories are a subset of previous (filter applied)
+            // or previous are a subset of new (filter cleared), it's cross-filter
+            const isFilter = Visual.isSubset(currentCategories, prev) || Visual.isSubset(prev, currentCategories);
+            return isFilter ? cfStyle : entrStyle;
+        }
+
+        // Same categories, values changed (e.g. new measure added)
         if (valueKey !== this.previousValueKey) return cfStyle;
 
         return "none";
@@ -200,7 +222,7 @@ export class Visual implements IVisual {
         if (!dataView?.categorical?.categories?.[0]) {
             this.svg.selectAll("g.chart-group > *").remove();
             this.isFirstRender = true;
-            this.previousCategoryKey = "";
+            this.previousCategories = new Set();
             this.previousValueKey = "";
             this.previousHighlightKey = "";
             return;
@@ -231,7 +253,7 @@ export class Visual implements IVisual {
         const { data, series, columnFormat, lineFormat } = this.parseData(dataView.categorical);
 
         // Build fingerprints for animation detection
-        const categoryKey = data.map(d => d.category).join("|");
+        const currentCategories = new Set(data.map(d => d.category));
         const valueKey = data.map(d =>
             d.columnValues.map(v => v.value).join(",") + ";" + d.lineValues.map(v => v.value).join(",")
         ).join("|");
@@ -248,10 +270,10 @@ export class Visual implements IVisual {
             highlightKey = parts.join("|");
         }
 
-        const animStyle = this.resolveAnimationStyle(options.type, categoryKey, valueKey, highlightKey);
+        const animStyle = this.resolveAnimationStyle(options.type, currentCategories, valueKey, highlightKey);
 
         // Update tracking state
-        this.previousCategoryKey = categoryKey;
+        this.previousCategories = currentCategories;
         this.previousValueKey = valueKey;
         this.previousHighlightKey = highlightKey;
         this.isFirstRender = false;
