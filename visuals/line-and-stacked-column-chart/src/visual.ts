@@ -24,6 +24,7 @@ interface ChartDataPoint {
     selectionId: ISelectionId;
     columnValues: { name: string; value: number; color: string; format: string }[];
     lineValues: { name: string; value: number; color: string; format: string }[];
+    tooltipValues: { name: string; value: number; format: string }[];
 }
 
 interface SeriesInfo {
@@ -374,7 +375,11 @@ export class Visual implements IVisual {
         const userLineColor = this.formattingSettings.lineSettingsCard.fill.value.value;
         const columnMeasures: DataViewValueColumn[] = [];
         const lineMeasures: DataViewValueColumn[] = [];
+        const tooltipMeasures: DataViewValueColumn[] = [];
         let columnFormat = "", lineFormat = "";
+
+        // Detect whether a Column Legend grouping is active
+        const hasLegend = values && values.source && values.source.roles?.["columnLegend"];
 
         if (values) {
             for (let i = 0; i < values.length; i++) {
@@ -383,10 +388,22 @@ export class Visual implements IVisual {
                 if (roleName?.["columnValues"]) {
                     columnMeasures.push(col);
                     if (!columnFormat && col.source.format) columnFormat = col.source.format;
-                    const color = columnMeasures.length === 1
-                        ? userColumnColor
-                        : DEFAULT_COLUMN_COLORS[(columnMeasures.length - 1) % DEFAULT_COLUMN_COLORS.length];
-                    series.push({ name: col.source.displayName, color, type: "column" });
+
+                    // Series name: use groupName when legend is active, otherwise displayName
+                    const seriesName = hasLegend && col.source.groupName != null
+                        ? String(col.source.groupName)
+                        : col.source.displayName;
+
+                    // Color: use host palette for legend groups, fallback for manual measures
+                    let color: string;
+                    if (hasLegend && col.source.groupName != null) {
+                        color = this.host.colorPalette.getColor(String(col.source.groupName)).value;
+                    } else if (columnMeasures.length === 1) {
+                        color = userColumnColor;
+                    } else {
+                        color = DEFAULT_COLUMN_COLORS[(columnMeasures.length - 1) % DEFAULT_COLUMN_COLORS.length];
+                    }
+                    series.push({ name: seriesName, color, type: "column" });
                 } else if (roleName?.["lineValues"]) {
                     lineMeasures.push(col);
                     if (!lineFormat && col.source.format) lineFormat = col.source.format;
@@ -394,6 +411,8 @@ export class Visual implements IVisual {
                         ? userLineColor
                         : DEFAULT_LINE_COLORS[(lineMeasures.length - 1) % DEFAULT_LINE_COLORS.length];
                     series.push({ name: col.source.displayName, color, type: "line" });
+                } else if (roleName?.["tooltips"]) {
+                    tooltipMeasures.push(col);
                 }
             }
         }
@@ -401,16 +420,27 @@ export class Visual implements IVisual {
         const data: ChartDataPoint[] = catValues.map((cat, i) => ({
             category: String(cat),
             selectionId: this.host.createSelectionIdBuilder().withCategory(categories, i).createSelectionId(),
-            columnValues: columnMeasures.map((col, ci) => ({
-                name: col.source.displayName,
-                value: Number(col.values[i]) || 0,
-                color: ci === 0 ? userColumnColor : DEFAULT_COLUMN_COLORS[ci % DEFAULT_COLUMN_COLORS.length],
-                format: col.source.format || ""
-            })),
+            columnValues: columnMeasures.map((col, ci) => {
+                const seriesEntry = series.find(s => s.type === "column" &&
+                    s.name === (hasLegend && col.source.groupName != null
+                        ? String(col.source.groupName)
+                        : col.source.displayName));
+                return {
+                    name: seriesEntry?.name || col.source.displayName,
+                    value: Number(col.values[i]) || 0,
+                    color: seriesEntry?.color || DEFAULT_COLUMN_COLORS[ci % DEFAULT_COLUMN_COLORS.length],
+                    format: col.source.format || ""
+                };
+            }),
             lineValues: lineMeasures.map((col, li) => ({
                 name: col.source.displayName,
                 value: Number(col.values[i]) || 0,
                 color: li === 0 ? userLineColor : DEFAULT_LINE_COLORS[li % DEFAULT_LINE_COLORS.length],
+                format: col.source.format || ""
+            })),
+            tooltipValues: tooltipMeasures.map(col => ({
+                name: col.source.displayName,
+                value: Number(col.values[i]) || 0,
                 format: col.source.format || ""
             }))
         }));
@@ -578,8 +608,11 @@ export class Visual implements IVisual {
                             highlightSelection(d.selectionId);
                         })
                         .on("mouseover", function () {
-                            tooltipDiv.style("display", "block")
-                                .html(`<strong>${d.category}</strong><br/>${cv.name}: ${formatDataLabel(cv.value, cv.format)}`);
+                            let html = `<strong>${d.category}</strong><br/>${cv.name}: ${formatDataLabel(cv.value, cv.format)}`;
+                            d.tooltipValues.forEach(tv => {
+                                html += `<br/>${tv.name}: ${formatDataLabel(tv.value, tv.format)}`;
+                            });
+                            tooltipDiv.style("display", "block").html(html);
                         })
                         .on("mousemove", function (event: MouseEvent) {
                             tooltipDiv.style("left", `${event.offsetX + 12}px`).style("top", `${event.offsetY - 28}px`);
@@ -771,8 +804,11 @@ export class Visual implements IVisual {
                             selectionManager.select(d.selectionId, event.ctrlKey || event.metaKey);
                         })
                         .on("mouseover", function () {
-                            tooltipDiv.style("display", "block")
-                                .html(`<strong>${d.category}</strong><br/>${d.lineValues[li].name}: ${formatDataLabel(d.lineValues[li].value, fmt)}`);
+                            let html = `<strong>${d.category}</strong><br/>${d.lineValues[li].name}: ${formatDataLabel(d.lineValues[li].value, fmt)}`;
+                            d.tooltipValues.forEach(tv => {
+                                html += `<br/>${tv.name}: ${formatDataLabel(tv.value, tv.format)}`;
+                            });
+                            tooltipDiv.style("display", "block").html(html);
                         })
                         .on("mousemove", function (event: MouseEvent) {
                             tooltipDiv.style("left", `${event.offsetX + 12}px`).style("top", `${event.offsetY - 28}px`);

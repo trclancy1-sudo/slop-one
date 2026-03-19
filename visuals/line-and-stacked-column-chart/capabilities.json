@@ -7,6 +7,12 @@
             "description": "The categorical axis (e.g. months, regions)"
         },
         {
+            "displayName": "Column Legend",
+            "name": "columnLegend",
+            "kind": "Grouping",
+            "description": "Categorical field to split columns into series (e.g. product, region)"
+        },
+        {
             "displayName": "Column Values",
             "name": "columnValues",
             "kind": "Measure",
@@ -17,6 +23,12 @@
             "name": "lineValues",
             "kind": "Measure",
             "description": "Measures displayed as lines"
+        },
+        {
+            "displayName": "Tooltips",
+            "name": "tooltips",
+            "kind": "Measure",
+            "description": "Extra measures shown only in tooltips"
         }
     ],
     "objects": {
@@ -325,8 +337,10 @@
             "conditions": [
                 {
                     "category": { "max": 1 },
+                    "columnLegend": { "max": 1 },
                     "columnValues": { "min": 0 },
-                    "lineValues": { "min": 0 }
+                    "lineValues": { "min": 0 },
+                    "tooltips": { "min": 0 }
                 }
             ],
             "categorical": {
@@ -339,18 +353,26 @@
                     }
                 },
                 "values": {
-                    "select": [
-                        {
-                            "for": {
-                                "in": "columnValues"
+                    "group": {
+                        "by": "columnLegend",
+                        "select": [
+                            {
+                                "for": {
+                                    "in": "columnValues"
+                                }
+                            },
+                            {
+                                "for": {
+                                    "in": "lineValues"
+                                }
+                            },
+                            {
+                                "for": {
+                                    "in": "tooltips"
+                                }
                             }
-                        },
-                        {
-                            "for": {
-                                "in": "lineValues"
-                            }
-                        }
-                    ]
+                        ]
+                    }
                 }
             }
         }
