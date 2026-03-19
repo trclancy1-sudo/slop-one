@@ -45,6 +45,11 @@
                         "numeric": true
                     }
                 },
+                "cornerRadius": {
+                    "type": {
+                        "numeric": true
+                    }
+                },
                 "showDataLabels": {
                     "type": {
                         "bool": true

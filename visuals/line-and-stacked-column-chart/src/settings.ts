@@ -25,6 +25,12 @@ class ColumnSettingsCard extends FormattingSettingsCard {
         value: 0
     });
 
+    cornerRadius = new formattingSettings.NumUpDown({
+        name: "cornerRadius",
+        displayName: "Corner Radius",
+        value: 0
+    });
+
     showDataLabels = new formattingSettings.ToggleSwitch({
         name: "showDataLabels",
         displayName: "Show Data Labels",
@@ -46,7 +52,7 @@ class ColumnSettingsCard extends FormattingSettingsCard {
     name: string = "columnSettings";
     displayName: string = "Column Settings";
     slices: Array<FormattingSettingsSlice> = [
-        this.fill, this.borderColor, this.borderWidth,
+        this.fill, this.borderColor, this.borderWidth, this.cornerRadius,
         this.showDataLabels, this.dataLabelFontSize, this.dataLabelColor
     ];
 }
