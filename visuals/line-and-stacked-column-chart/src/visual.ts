@@ -232,16 +232,90 @@ export class Visual implements IVisual {
         const height = options.viewport.height;
         this.svg.attr("width", width).attr("height", height);
 
+        const { data, series, columnFormat, lineFormat } = this.parseData(dataView.categorical);
+
+        // ── Dynamic margin calculation ──
+        // Each section declares how much space it needs; chart area gets the remainder.
         const showLegend = this.formattingSettings.legendCard.show.value;
         const legendPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
-        const legendSpace = showLegend ? 24 : 0;
-        const margin = { top: 8, right: 45, bottom: 40, left: 45 };
+        const legFS = this.formattingSettings.legendCard.fontSize.value;
+        const showXA = this.formattingSettings.xAxisCard.show.value;
+        const showYA = this.formattingSettings.yAxisCard.show.value;
+        const xFS = this.formattingSettings.xAxisCard.fontSize.value;
+        const yFS = this.formattingSettings.yAxisCard.fontSize.value;
+        const xTitle = this.formattingSettings.xAxisCard.title.value;
+        const yLT = this.formattingSettings.yAxisCard.leftTitle.value;
+        const yRT = this.formattingSettings.yAxisCard.rightTitle.value;
+        const hasColumns = data.some(d => d.columnValues.length > 0);
+        const hasLines = data.some(d => d.lineValues.length > 0);
 
-        if (showLegend) {
-            if (legendPos === "top") margin.top += legendSpace;
-            else if (legendPos === "bottom") margin.bottom += legendSpace;
-            else if (legendPos === "left") margin.left += legendSpace + 50;
-            else if (legendPos === "right") margin.right += legendSpace + 50;
+        // Legend space calculation
+        let legendH = 0, legendW = 0;
+        if (showLegend && series.length > 0) {
+            if (legendPos === "top" || legendPos === "bottom") {
+                // Single row: icon height + padding
+                legendH = legFS + 10;
+            } else {
+                // Vertical: one row per series
+                legendH = series.length * (legFS + 8);
+                // Width: estimate from longest name
+                const maxNameLen = Math.max(...series.map(s => s.name.length));
+                legendW = 14 + maxNameLen * legFS * 0.55 + 8;
+            }
+        }
+
+        // X-axis label height: rotated at -35°, estimate from longest category label
+        let xAxisH = 0;
+        if (showXA) {
+            const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
+            const charW = xFS * 0.55;
+            const labelW = maxCatLen * charW;
+            // Height contribution of rotated text: labelW * sin(35°) + fontSize * cos(35°)
+            xAxisH = labelW * Math.sin(35 * Math.PI / 180) + xFS * Math.cos(35 * Math.PI / 180);
+            xAxisH = Math.min(xAxisH, height * 0.3); // cap at 30% of visual height
+            xAxisH += 6; // tick mark + padding
+            if (xTitle) xAxisH += xFS + 6;
+        }
+
+        // Y-axis tick label width estimate
+        let yLeftW = 0, yRightW = 0;
+        if (showYA) {
+            if (hasColumns) {
+                yLeftW = yFS * 3.5 + 6; // typical formatted number width + tick + padding
+                if (yLT) yLeftW += yFS + 4;
+            }
+            if (hasLines) {
+                yRightW = yFS * 3.5 + 6;
+                if (yRT) yRightW += yFS + 4;
+            }
+        }
+
+        // Assemble margins — each edge accounts for its sections with explicit gaps
+        const PAD = 4; // base padding from visual edge
+        const GAP = 6; // gap between adjacent sections
+        const margin = { top: PAD, right: PAD, bottom: PAD, left: PAD };
+
+        // Bottom: x-axis labels + gap + legend (if bottom)
+        margin.bottom += xAxisH;
+        if (showLegend && legendPos === "bottom") {
+            margin.bottom += GAP + legendH;
+        }
+
+        // Top: legend (if top)
+        if (showLegend && legendPos === "top") {
+            margin.top += legendH + GAP;
+        }
+
+        // Left: y-axis left + legend (if left)
+        margin.left += yLeftW;
+        if (showLegend && legendPos === "left") {
+            margin.left += legendW + GAP;
+        }
+
+        // Right: y-axis right + legend (if right)
+        margin.right += yRightW;
+        if (showLegend && legendPos === "right") {
+            margin.right += legendW + GAP;
         }
 
         const plotWidth = width - margin.left - margin.right;
@@ -249,8 +323,6 @@ export class Visual implements IVisual {
         if (plotWidth <= 0 || plotHeight <= 0) return;
 
         this.chartGroup.attr("transform", `translate(${margin.left},${margin.top})`);
-
-        const { data, series, columnFormat, lineFormat } = this.parseData(dataView.categorical);
 
         // Build fingerprints for animation detection
         const currentCategories = new Set(data.map(d => d.category));
@@ -708,33 +780,40 @@ export class Visual implements IVisual {
         }
 
         // ── Legend ──
+        // Legend is positioned within its reserved margin space, never overlapping the chart or axes.
         const showLeg = this.formattingSettings.legendCard.show.value;
         if (showLeg && series.length > 0) {
             const legFS = this.formattingSettings.legendCard.fontSize.value;
             const legFC = this.formattingSettings.legendCard.fontColor.value.value;
             const legPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
             const legG = this.chartGroup.append("g").classed("legend", true);
+            const legRowH = legFS + 10;
 
             if (legPos === "bottom") {
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - 8})`);
-                this.renderHLegend(legG, series, legFS, legFC);
+                // Place legend at the very bottom of the margin: below x-axis area
+                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legRowH})`);
+                this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
-                legG.attr("transform", `translate(0,${-margin.top + 4})`);
-                this.renderHLegend(legG, series, legFS, legFC);
+                // Place legend at the very top of the margin
+                legG.attr("transform", `translate(0,${-margin.top + legRowH})`);
+                this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "left") {
-                legG.attr("transform", `translate(${-margin.left + 5},0)`);
+                legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             } else if (legPos === "right") {
-                legG.attr("transform", `translate(${plotWidth + 30},0)`);
+                // Right of right y-axis
+                const rightAxisW = this.formattingSettings.yAxisCard.show.value ? yFS * 3.5 + 6 : 0;
+                legG.attr("transform", `translate(${plotWidth + rightAxisW + 8},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }
     }
 
     private renderHLegend(g: d3.Selection<SVGGElement, unknown, null, undefined>,
-        series: SeriesInfo[], fs: number, fc: string) {
+        series: SeriesInfo[], fs: number, fc: string, maxWidth: number) {
         let xOff = 0;
         series.forEach(s => {
+            if (xOff >= maxWidth) return; // no room for more items
             const item = g.append("g").classed("legend-item", true).attr("transform", `translate(${xOff},0)`);
             if (s.type === "column") {
                 item.append("rect").attr("width", 12).attr("height", 12).attr("y", -10).attr("fill", s.color);
@@ -744,7 +823,16 @@ export class Visual implements IVisual {
             }
             const t = item.append("text").classed("legend-text", true).attr("x", 16).attr("y", 0)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
-            xOff += ((t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * 7) + 30;
+            const textW = (t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * fs * 0.55;
+            // Truncate text if it would overflow the available width
+            const availW = maxWidth - xOff - 16;
+            if (availW < textW && availW > 0) {
+                // Approximate truncation
+                const ratio = availW / textW;
+                const truncLen = Math.max(1, Math.floor(s.name.length * ratio) - 1);
+                t.text(s.name.substring(0, truncLen) + "\u2026");
+            }
+            xOff += Math.min(textW, maxWidth - xOff) + 30;
         });
     }
 
