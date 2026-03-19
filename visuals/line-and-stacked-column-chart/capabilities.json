@@ -30,6 +30,39 @@
                             }
                         }
                     }
+                },
+                "borderColor": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                },
+                "borderWidth": {
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "showDataLabels": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "dataLabelFontSize": {
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "dataLabelColor": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -53,6 +86,39 @@
                     "type": {
                         "bool": true
                     }
+                },
+                "markerSize": {
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "showDataLabels": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "dataLabelFontSize": {
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "dataLabelColor": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                },
+                "lineStyle": {
+                    "type": {
+                        "enumeration": [
+                            { "value": "solid", "displayName": "Solid" },
+                            { "value": "dashed", "displayName": "Dashed" },
+                            { "value": "dotted", "displayName": "Dotted" }
+                        ]
+                    }
                 }
             }
         },
@@ -63,11 +129,67 @@
                         "bool": true
                     }
                 },
+                "position": {
+                    "type": {
+                        "enumeration": [
+                            { "value": "bottom", "displayName": "Bottom" },
+                            { "value": "top", "displayName": "Top" },
+                            { "value": "left", "displayName": "Left" },
+                            { "value": "right", "displayName": "Right" }
+                        ]
+                    }
+                },
                 "fontSize": {
                     "type": {
                         "formatting": {
                             "fontSize": true
                         }
+                    }
+                },
+                "fontColor": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "gridlines": {
+            "properties": {
+                "showHorizontal": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "showVertical": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "color": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                },
+                "strokeWidth": {
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "lineStyle": {
+                    "type": {
+                        "enumeration": [
+                            { "value": "solid", "displayName": "Solid" },
+                            { "value": "dashed", "displayName": "Dashed" },
+                            { "value": "dotted", "displayName": "Dotted" }
+                        ]
                     }
                 }
             }
@@ -85,6 +207,20 @@
                             "fontSize": true
                         }
                     }
+                },
+                "fontColor": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                },
+                "title": {
+                    "type": {
+                        "text": true
+                    }
                 }
             }
         },
@@ -100,6 +236,25 @@
                         "formatting": {
                             "fontSize": true
                         }
+                    }
+                },
+                "fontColor": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                },
+                "leftTitle": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "rightTitle": {
+                    "type": {
+                        "text": true
                     }
                 }
             }
