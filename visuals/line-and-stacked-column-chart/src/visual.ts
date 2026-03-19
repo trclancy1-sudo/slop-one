@@ -39,6 +39,8 @@ export class Visual implements IVisual {
     private formattingSettingsService: FormattingSettingsService;
 
     private margin = { top: 20, right: 40, bottom: 50, left: 50 };
+    private static readonly ANIMATION_DURATION = 800;
+    private static readonly ANIMATION_STAGGER = 80;
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -204,31 +206,39 @@ export class Visual implements IVisual {
             }
         }
 
-        // Draw stacked columns
+        // Draw stacked columns with grow-up animation staggered left to right
         if (data[0].columnValues.length > 0) {
             const columnGroup = this.chartGroup.append("g").classed("columns", true);
 
-            data.forEach(d => {
+            data.forEach((d, catIndex) => {
                 let yOffset = 0;
                 d.columnValues.forEach(cv => {
                     const barHeight = yScaleLeft(0) - yScaleLeft(cv.value);
+                    const finalY = yScaleLeft(yOffset + cv.value);
                     columnGroup.append("rect")
                         .classed("column-rect", true)
                         .attr("x", xScale(d.category))
-                        .attr("y", yScaleLeft(yOffset + cv.value))
+                        .attr("y", plotHeight)
                         .attr("width", xScale.bandwidth())
-                        .attr("height", barHeight)
-                        .attr("fill", cv.color);
+                        .attr("height", 0)
+                        .attr("fill", cv.color)
+                        .transition()
+                        .duration(Visual.ANIMATION_DURATION)
+                        .delay(catIndex * Visual.ANIMATION_STAGGER)
+                        .ease(d3.easeCubicOut)
+                        .attr("y", finalY)
+                        .attr("height", barHeight);
                     yOffset += cv.value;
                 });
             });
         }
 
-        // Draw lines
+        // Draw lines with left-to-right draw animation
         if (data[0].lineValues.length > 0) {
             const lineGroup = this.chartGroup.append("g").classed("lines", true);
             const lineWidth = this.formattingSettings.lineSettingsCard.strokeWidth.value;
             const showMarkers = this.formattingSettings.lineSettingsCard.showMarkers.value;
+            const lineDuration = Visual.ANIMATION_DURATION + data.length * Visual.ANIMATION_STAGGER;
 
             const numLineSeries = data[0].lineValues.length;
             for (let li = 0; li < numLineSeries; li++) {
@@ -239,21 +249,37 @@ export class Visual implements IVisual {
                     .y(d => yScaleRight(d.lineValues[li].value))
                     .curve(d3.curveMonotoneX);
 
-                lineGroup.append("path")
+                const path = lineGroup.append("path")
                     .datum(data)
                     .classed("line-path", true)
                     .attr("d", lineGen)
                     .attr("stroke", color)
                     .attr("stroke-width", lineWidth);
 
+                // Animate line drawing using stroke-dasharray
+                const pathNode = path.node() as SVGPathElement;
+                const totalLength = pathNode.getTotalLength();
+                path
+                    .attr("stroke-dasharray", totalLength)
+                    .attr("stroke-dashoffset", totalLength)
+                    .transition()
+                    .duration(lineDuration)
+                    .ease(d3.easeLinear)
+                    .attr("stroke-dashoffset", 0);
+
                 if (showMarkers) {
-                    data.forEach(d => {
+                    data.forEach((d, i) => {
                         lineGroup.append("circle")
                             .classed("line-marker", true)
                             .attr("cx", xScale(d.category) + xScale.bandwidth() / 2)
                             .attr("cy", yScaleRight(d.lineValues[li].value))
-                            .attr("r", 4)
-                            .attr("fill", color);
+                            .attr("r", 0)
+                            .attr("fill", color)
+                            .transition()
+                            .duration(200)
+                            .delay((i / (data.length - 1 || 1)) * lineDuration)
+                            .ease(d3.easeBackOut)
+                            .attr("r", 4);
                     });
                 }
             }
