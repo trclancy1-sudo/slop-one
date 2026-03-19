@@ -129,6 +129,7 @@ export class Visual implements IVisual {
     private isFirstRender = true;
     private previousCategoryKey = "";
     private previousValueKey = "";
+    private previousHighlightKey = "";
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -169,7 +170,9 @@ export class Visual implements IVisual {
      * Determine which animation style to use for this update.
      * Returns the user-chosen style from settings, or "none" for non-data updates.
      */
-    private resolveAnimationStyle(updateType: VisualUpdateType, categoryKey: string, valueKey: string): AnimationStyle {
+    private resolveAnimationStyle(
+        updateType: VisualUpdateType, categoryKey: string, valueKey: string, highlightKey: string
+    ): AnimationStyle {
         const entrStyle = (this.formattingSettings.animationCard.entranceStyle.value?.value || "growUp") as AnimationStyle;
         const cfStyle = (this.formattingSettings.animationCard.crossFilterStyle.value?.value || "spring") as AnimationStyle;
 
@@ -179,6 +182,9 @@ export class Visual implements IVisual {
         if (!isDataUpdate) return "none";
 
         if (categoryKey !== this.previousCategoryKey) return entrStyle;
+        // Cross-filter: highlights changed (another visual filtered this one)
+        if (highlightKey !== this.previousHighlightKey) return cfStyle;
+        // Values changed (e.g. new measure added)
         if (valueKey !== this.previousValueKey) return cfStyle;
 
         return "none";
@@ -196,6 +202,7 @@ export class Visual implements IVisual {
             this.isFirstRender = true;
             this.previousCategoryKey = "";
             this.previousValueKey = "";
+            this.previousHighlightKey = "";
             return;
         }
 
@@ -229,11 +236,24 @@ export class Visual implements IVisual {
             d.columnValues.map(v => v.value).join(",") + ";" + d.lineValues.map(v => v.value).join(",")
         ).join("|");
 
-        const animStyle = this.resolveAnimationStyle(options.type, categoryKey, valueKey);
+        // Build highlight fingerprint from raw DataView (cross-filtering sets highlights on value columns)
+        const dvValues = dataView.categorical.values;
+        let highlightKey = "";
+        if (dvValues) {
+            const parts: string[] = [];
+            for (let i = 0; i < dvValues.length; i++) {
+                const hl = dvValues[i].highlights;
+                parts.push(hl ? hl.map(h => h ?? "null").join(",") : "none");
+            }
+            highlightKey = parts.join("|");
+        }
+
+        const animStyle = this.resolveAnimationStyle(options.type, categoryKey, valueKey, highlightKey);
 
         // Update tracking state
         this.previousCategoryKey = categoryKey;
         this.previousValueKey = valueKey;
+        this.previousHighlightKey = highlightKey;
         this.isFirstRender = false;
 
         this.render(data, series, plotWidth, plotHeight, margin, columnFormat, lineFormat, animStyle);
