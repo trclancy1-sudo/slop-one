@@ -32,16 +32,14 @@ interface SeriesInfo {
     type: "column" | "line";
 }
 
-type AnimationType = "entrance" | "spring" | "none";
+type AnimationStyle = "growUp" | "fadeIn" | "spring" | "none";
 
 // ── Constants ──────────────────────────────────────────────────────
 
 const DEFAULT_COLUMN_COLORS = ["#4682B4", "#5B9BD5", "#2E75B6", "#7FAADC", "#A9C4E8", "#1F4E79"];
 const DEFAULT_LINE_COLORS = ["#FF6347", "#E84C30", "#FF8C69", "#CD5C5C"];
 
-const ENTRANCE_DURATION = 800;
-const ENTRANCE_STAGGER = 80;
-const SPRING_DURATION = 500;
+const DEFAULT_STAGGER = 80;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -168,34 +166,21 @@ export class Visual implements IVisual {
     }
 
     /**
-     * Determine the animation type for this update.
-     *  - First render or category structure changed → entrance
-     *  - Same categories but different values (cross-filter) → spring
-     *  - Resize / formatting only → none
+     * Determine which animation style to use for this update.
+     * Returns the user-chosen style from settings, or "none" for non-data updates.
      */
-    private detectAnimationType(updateType: VisualUpdateType, categoryKey: string, valueKey: string): AnimationType {
-        if (this.isFirstRender) {
-            return "entrance";
-        }
+    private resolveAnimationStyle(updateType: VisualUpdateType, categoryKey: string, valueKey: string): AnimationStyle {
+        const entrStyle = (this.formattingSettings.animationCard.entranceStyle.value?.value || "growUp") as AnimationStyle;
+        const cfStyle = (this.formattingSettings.animationCard.crossFilterStyle.value?.value || "spring") as AnimationStyle;
 
-        // Resize-only or style-only updates: no animation
+        if (this.isFirstRender) return entrStyle;
+
         const isDataUpdate = (updateType & VisualUpdateType.Data) !== 0;
-        if (!isDataUpdate) {
-            return "none";
-        }
+        if (!isDataUpdate) return "none";
 
-        // Data update: check what changed
-        if (categoryKey !== this.previousCategoryKey) {
-            // Categories changed (bookmark, page nav, slicer) → entrance
-            return "entrance";
-        }
+        if (categoryKey !== this.previousCategoryKey) return entrStyle;
+        if (valueKey !== this.previousValueKey) return cfStyle;
 
-        if (valueKey !== this.previousValueKey) {
-            // Same categories, different values → cross-filter spring
-            return "spring";
-        }
-
-        // Data sent again but nothing actually changed (e.g. formatting change triggers data re-send)
         return "none";
     }
 
@@ -220,14 +205,14 @@ export class Visual implements IVisual {
 
         const showLegend = this.formattingSettings.legendCard.show.value;
         const legendPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
-        const legendSpace = showLegend ? 40 : 0;
-        const margin = { top: 20, right: 50, bottom: 50, left: 50 };
+        const legendSpace = showLegend ? 24 : 0;
+        const margin = { top: 8, right: 45, bottom: 40, left: 45 };
 
         if (showLegend) {
             if (legendPos === "top") margin.top += legendSpace;
             else if (legendPos === "bottom") margin.bottom += legendSpace;
-            else if (legendPos === "left") margin.left += legendSpace + 60;
-            else if (legendPos === "right") margin.right += legendSpace + 60;
+            else if (legendPos === "left") margin.left += legendSpace + 50;
+            else if (legendPos === "right") margin.right += legendSpace + 50;
         }
 
         const plotWidth = width - margin.left - margin.right;
@@ -244,14 +229,14 @@ export class Visual implements IVisual {
             d.columnValues.map(v => v.value).join(",") + ";" + d.lineValues.map(v => v.value).join(",")
         ).join("|");
 
-        const animationType = this.detectAnimationType(options.type, categoryKey, valueKey);
+        const animStyle = this.resolveAnimationStyle(options.type, categoryKey, valueKey);
 
         // Update tracking state
         this.previousCategoryKey = categoryKey;
         this.previousValueKey = valueKey;
         this.isFirstRender = false;
 
-        this.render(data, series, plotWidth, plotHeight, margin, columnFormat, lineFormat, animationType);
+        this.render(data, series, plotWidth, plotHeight, margin, columnFormat, lineFormat, animStyle);
     }
 
     private parseData(categorical: DataViewCategorical): {
@@ -314,13 +299,18 @@ export class Visual implements IVisual {
         plotWidth: number, plotHeight: number,
         margin: { top: number; right: number; bottom: number; left: number },
         columnFormat: string, lineFormat: string,
-        animationType: AnimationType
+        animStyle: AnimationStyle
     ) {
         this.chartGroup.selectAll("*").remove();
         if (data.length === 0) return;
 
         const tooltipDiv = this.tooltipDiv;
         const selectionManager = this.selectionManager;
+        const animDuration = this.formattingSettings.animationCard.duration.value || 800;
+        const fontFamily = this.formattingSettings.fontSettingsCard.fontFamily.value?.value || "Segoe UI";
+
+        // Apply font family to the entire SVG
+        this.svg.style("font-family", `"${fontFamily}", sans-serif`);
 
         // ── Scales ──
         const xScale = d3.scaleBand().domain(data.map(d => d.category)).range([0, plotWidth]).padding(0.3);
@@ -363,13 +353,45 @@ export class Visual implements IVisual {
         const yRT = this.formattingSettings.yAxisCard.rightTitle.value;
 
         if (showXA) {
+            const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(xScale.bandwidth(), 60);
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
-            xa.selectAll("text").style("font-size", `${xFS}px`).style("fill", xFC)
-                .attr("transform", "rotate(-35)").style("text-anchor", "end");
+            // Replace default tick text with wrapped text
+            xa.selectAll(".tick text").each(function () {
+                const textEl = d3.select(this);
+                const fullText = textEl.text();
+                textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
+                    .attr("transform", "rotate(-35)").style("text-anchor", "end");
+
+                // Split into words and wrap
+                const words = fullText.split(/\s+/);
+                let line = "";
+                let lineNum = 0;
+                const lineHeight = xFS * 1.2;
+
+                words.forEach((word, wi) => {
+                    const testLine = line ? line + " " + word : word;
+                    // Estimate width: ~0.6em per char at given font size
+                    const estWidth = testLine.length * xFS * 0.55;
+                    if (estWidth > xLabelMaxW && line) {
+                        textEl.append("tspan")
+                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                            .text(line);
+                        line = word;
+                        lineNum++;
+                    } else {
+                        line = testLine;
+                    }
+                    if (wi === words.length - 1) {
+                        textEl.append("tspan")
+                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                            .text(line);
+                    }
+                });
+            });
             if (xTitle) {
                 this.chartGroup.append("text").classed("axis-title", true)
-                    .attr("x", plotWidth / 2).attr("y", plotHeight + margin.bottom - 10)
+                    .attr("x", plotWidth / 2).attr("y", plotHeight + margin.bottom - 5)
                     .attr("text-anchor", "middle").style("font-size", `${xFS + 1}px`).style("fill", xFC).text(xTitle);
             }
         }
@@ -444,17 +466,21 @@ export class Visual implements IVisual {
                         if (cBW > 0) bar.attr("stroke", cBC).attr("stroke-width", cBW);
                         setupInteractions(bar as unknown as d3.Selection<SVGElement, unknown, null, undefined>);
 
-                        if (animationType === "entrance") {
+                        if (animStyle === "growUp") {
                             bar.attr("d", roundedTopRect(bX, plotHeight, bW, 0, 0)).style("opacity", 0)
-                                .transition().duration(ENTRANCE_DURATION).delay(catIdx * ENTRANCE_STAGGER)
+                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
                                 .ease(d3.easeCubicOut).style("opacity", 0.85)
                                 .attr("d", roundedTopRect(bX, fY, bW, bH, r));
-                        } else if (animationType === "spring") {
+                        } else if (animStyle === "spring") {
                             bar.attr("d", roundedTopRect(bX, fY, bW, bH, r)).style("opacity", 0.85)
                                 .attr("transform", `translate(0, ${bH * 0.15})`)
-                                .transition().duration(SPRING_DURATION)
+                                .transition().duration(animDuration * 0.6)
                                 .ease(easeSpring)
                                 .attr("transform", "translate(0, 0)");
+                        } else if (animStyle === "fadeIn") {
+                            bar.attr("d", roundedTopRect(bX, fY, bW, bH, r)).style("opacity", 0)
+                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
+                                .style("opacity", 0.85);
                         } else {
                             bar.attr("d", roundedTopRect(bX, fY, bW, bH, r)).style("opacity", 0.85);
                         }
@@ -464,33 +490,49 @@ export class Visual implements IVisual {
                         if (cBW > 0) rect.attr("stroke", cBC).attr("stroke-width", cBW);
                         setupInteractions(rect as unknown as d3.Selection<SVGElement, unknown, null, undefined>);
 
-                        if (animationType === "entrance") {
+                        if (animStyle === "growUp") {
                             rect.attr("y", plotHeight).attr("height", 0).style("opacity", 0)
-                                .transition().duration(ENTRANCE_DURATION).delay(catIdx * ENTRANCE_STAGGER)
+                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
                                 .ease(d3.easeCubicOut).style("opacity", 0.85)
                                 .attr("y", fY).attr("height", bH);
-                        } else if (animationType === "spring") {
+                        } else if (animStyle === "spring") {
                             rect.attr("y", fY).attr("height", bH).style("opacity", 0.85)
                                 .attr("transform", `translate(0, ${bH * 0.15})`)
-                                .transition().duration(SPRING_DURATION)
+                                .transition().duration(animDuration * 0.6)
                                 .ease(easeSpring)
                                 .attr("transform", "translate(0, 0)");
+                        } else if (animStyle === "fadeIn") {
+                            rect.attr("y", fY).attr("height", bH).style("opacity", 0)
+                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
+                                .style("opacity", 0.85);
                         } else {
                             rect.attr("y", fY).attr("height", bH).style("opacity", 0.85);
                         }
                     }
 
-                    // Data labels
+                    // Data labels — repositioned to avoid cutoff at edges
                     if (cSL && cv.value > 0) {
+                        let lblX = bX + bW / 2;
+                        let lblAnchor = "middle";
+                        // Prevent cutoff at right edge
+                        if (lblX + cLFS * 2 > plotWidth) {
+                            lblX = bX + bW - 2;
+                            lblAnchor = "end";
+                        }
+                        // Prevent cutoff at left edge
+                        if (lblX - cLFS * 2 < 0) {
+                            lblX = bX + 2;
+                            lblAnchor = "start";
+                        }
                         const lbl = colG.append("text").classed("data-label", true)
-                            .attr("x", bX + bW / 2).attr("y", fY + bH / 2 + cLFS / 3)
-                            .attr("text-anchor", "middle").style("font-size", `${cLFS}px`)
+                            .attr("x", lblX).attr("y", fY + bH / 2 + cLFS / 3)
+                            .attr("text-anchor", lblAnchor).style("font-size", `${cLFS}px`)
                             .style("fill", cLC).style("pointer-events", "none")
                             .text(formatDataLabel(cv.value, cv.format));
 
-                        if (animationType === "entrance") {
-                            lbl.style("opacity", 0).transition().duration(ENTRANCE_DURATION)
-                                .delay(catIdx * ENTRANCE_STAGGER).style("opacity", 1);
+                        if (animStyle !== "none") {
+                            lbl.style("opacity", 0).transition().duration(animDuration)
+                                .delay(catIdx * DEFAULT_STAGGER).style("opacity", 1);
                         }
                     }
 
@@ -525,7 +567,7 @@ export class Visual implements IVisual {
         const lSL = this.formattingSettings.lineSettingsCard.showDataLabels.value;
         const lLFS = this.formattingSettings.lineSettingsCard.dataLabelFontSize.value;
         const lLC = this.formattingSettings.lineSettingsCard.dataLabelColor.value.value;
-        const entrLineD = ENTRANCE_DURATION + data.length * ENTRANCE_STAGGER;
+        const entrLineD = animDuration + data.length * DEFAULT_STAGGER;
 
         // ── Draw lines ──
         if (data[0].lineValues.length > 0) {
@@ -546,15 +588,14 @@ export class Visual implements IVisual {
 
                 if (lDash !== "none") {
                     path.attr("stroke-dasharray", lDash);
-                } else if (animationType === "entrance") {
+                } else if (animStyle === "growUp") {
                     const node = path.node() as SVGPathElement;
                     const len = node.getTotalLength();
                     path.attr("stroke-dasharray", len).attr("stroke-dashoffset", len)
                         .transition().duration(entrLineD).ease(d3.easeLinear).attr("stroke-dashoffset", 0);
+                } else if (animStyle === "fadeIn") {
+                    path.style("opacity", 0).transition().duration(animDuration).style("opacity", 1);
                 }
-                // Spring animation for lines: no special treatment needed—
-                // lines redraw instantly at new positions, the spring effect on markers
-                // provides the visual feedback.
 
                 if (showM) {
                     data.forEach((d, i) => {
@@ -577,16 +618,20 @@ export class Visual implements IVisual {
                         })
                         .on("mouseout", function () { tooltipDiv.style("display", "none"); });
 
-                        if (animationType === "entrance") {
+                        if (animStyle === "growUp") {
                             marker.attr("cy", cy).attr("r", 0)
                                 .transition().duration(200)
                                 .delay((i / (data.length - 1 || 1)) * entrLineD)
                                 .ease(d3.easeBackOut).attr("r", mSize);
-                        } else if (animationType === "spring") {
-                            // Markers drop in from above with spring wobble
+                        } else if (animStyle === "spring") {
                             marker.attr("cy", cy - 20).attr("r", mSize)
-                                .transition().duration(SPRING_DURATION)
+                                .transition().duration(animDuration * 0.6)
                                 .ease(easeSpring).attr("cy", cy);
+                        } else if (animStyle === "fadeIn") {
+                            marker.attr("cy", cy).attr("r", mSize).style("opacity", 0)
+                                .transition().duration(animDuration)
+                                .delay((i / (data.length - 1 || 1)) * entrLineD)
+                                .style("opacity", 1);
                         } else {
                             marker.attr("cy", cy).attr("r", mSize);
                         }
@@ -595,14 +640,23 @@ export class Visual implements IVisual {
 
                 if (lSL) {
                     data.forEach((d, i) => {
+                        let lblX = xScale(d.category)! + xScale.bandwidth() / 2;
+                        let lblY = yR(d.lineValues[li].value) - mSize - 4;
+                        let lblAnchor = "middle";
+                        // Prevent cutoff at right edge
+                        if (lblX + lLFS * 2 > plotWidth) { lblAnchor = "end"; }
+                        // Prevent cutoff at left edge
+                        if (lblX - lLFS * 2 < 0) { lblAnchor = "start"; }
+                        // Prevent cutoff at top
+                        if (lblY < lLFS) { lblY = yR(d.lineValues[li].value) + mSize + lLFS; }
+
                         const lbl = lineG.append("text").classed("data-label", true)
-                            .attr("x", xScale(d.category)! + xScale.bandwidth() / 2)
-                            .attr("y", yR(d.lineValues[li].value) - mSize - 4)
-                            .attr("text-anchor", "middle").style("font-size", `${lLFS}px`)
+                            .attr("x", lblX).attr("y", lblY)
+                            .attr("text-anchor", lblAnchor).style("font-size", `${lLFS}px`)
                             .style("fill", lLC).style("pointer-events", "none")
                             .text(formatDataLabel(d.lineValues[li].value, fmt));
 
-                        if (animationType === "entrance") {
+                        if (animStyle !== "none") {
                             lbl.style("opacity", 0).transition().duration(200)
                                 .delay((i / (data.length - 1 || 1)) * entrLineD).style("opacity", 1);
                         }
@@ -620,16 +674,16 @@ export class Visual implements IVisual {
             const legG = this.chartGroup.append("g").classed("legend", true);
 
             if (legPos === "bottom") {
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - 15})`);
+                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - 8})`);
                 this.renderHLegend(legG, series, legFS, legFC);
             } else if (legPos === "top") {
-                legG.attr("transform", `translate(0,${-margin.top + 10})`);
+                legG.attr("transform", `translate(0,${-margin.top + 4})`);
                 this.renderHLegend(legG, series, legFS, legFC);
             } else if (legPos === "left") {
                 legG.attr("transform", `translate(${-margin.left + 5},0)`);
                 this.renderVLegend(legG, series, legFS, legFC);
             } else if (legPos === "right") {
-                legG.attr("transform", `translate(${plotWidth + 40},0)`);
+                legG.attr("transform", `translate(${plotWidth + 30},0)`);
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }

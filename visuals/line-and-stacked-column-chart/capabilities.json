@@ -20,6 +20,56 @@
         }
     ],
     "objects": {
+        "animation": {
+            "properties": {
+                "entranceStyle": {
+                    "type": {
+                        "enumeration": [
+                            { "value": "growUp", "displayName": "Grow Up" },
+                            { "value": "fadeIn", "displayName": "Fade In" },
+                            { "value": "spring", "displayName": "Spring" },
+                            { "value": "none", "displayName": "None" }
+                        ]
+                    }
+                },
+                "crossFilterStyle": {
+                    "type": {
+                        "enumeration": [
+                            { "value": "spring", "displayName": "Spring" },
+                            { "value": "growUp", "displayName": "Grow Up" },
+                            { "value": "fadeIn", "displayName": "Fade In" },
+                            { "value": "none", "displayName": "None" }
+                        ]
+                    }
+                },
+                "duration": {
+                    "type": {
+                        "numeric": true
+                    }
+                }
+            }
+        },
+        "fontSettings": {
+            "properties": {
+                "fontFamily": {
+                    "type": {
+                        "enumeration": [
+                            { "value": "Segoe UI", "displayName": "Segoe UI" },
+                            { "value": "Arial", "displayName": "Arial" },
+                            { "value": "Calibri", "displayName": "Calibri" },
+                            { "value": "Verdana", "displayName": "Verdana" },
+                            { "value": "Tahoma", "displayName": "Tahoma" },
+                            { "value": "Trebuchet MS", "displayName": "Trebuchet MS" },
+                            { "value": "Georgia", "displayName": "Georgia" },
+                            { "value": "Times New Roman", "displayName": "Times New Roman" },
+                            { "value": "Courier New", "displayName": "Courier New" },
+                            { "value": "DIN", "displayName": "DIN" },
+                            { "value": "wf_standard-font", "displayName": "Power BI Standard" }
+                        ]
+                    }
+                }
+            }
+        },
         "columnSettings": {
             "properties": {
                 "fill": {
@@ -225,6 +275,11 @@
                 "title": {
                     "type": {
                         "text": true
+                    }
+                },
+                "maxWidth": {
+                    "type": {
+                        "numeric": true
                     }
                 }
             }

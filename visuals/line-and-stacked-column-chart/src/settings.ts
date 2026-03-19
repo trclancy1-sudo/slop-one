@@ -6,6 +6,69 @@ import FormattingSettingsCard = formattingSettings.SimpleCard;
 import FormattingSettingsSlice = formattingSettings.Slice;
 import FormattingSettingsModel = formattingSettings.Model;
 
+class AnimationSettingsCard extends FormattingSettingsCard {
+    entranceStyle = new formattingSettings.ItemDropdown({
+        name: "entranceStyle",
+        displayName: "Entrance Animation",
+        description: "Animation when visual first appears (page navigation, bookmarks)",
+        items: [
+            { value: "growUp", displayName: "Grow Up" },
+            { value: "fadeIn", displayName: "Fade In" },
+            { value: "spring", displayName: "Spring" },
+            { value: "none", displayName: "None" }
+        ],
+        value: { value: "growUp", displayName: "Grow Up" }
+    });
+
+    crossFilterStyle = new formattingSettings.ItemDropdown({
+        name: "crossFilterStyle",
+        displayName: "Cross-Filter Animation",
+        description: "Animation when data changes via cross-filtering from another visual",
+        items: [
+            { value: "spring", displayName: "Spring" },
+            { value: "growUp", displayName: "Grow Up" },
+            { value: "fadeIn", displayName: "Fade In" },
+            { value: "none", displayName: "None" }
+        ],
+        value: { value: "spring", displayName: "Spring" }
+    });
+
+    duration = new formattingSettings.NumUpDown({
+        name: "duration",
+        displayName: "Animation Duration (ms)",
+        value: 800
+    });
+
+    name: string = "animation";
+    displayName: string = "Animation";
+    slices: Array<FormattingSettingsSlice> = [this.entranceStyle, this.crossFilterStyle, this.duration];
+}
+
+class FontSettingsCard extends FormattingSettingsCard {
+    fontFamily = new formattingSettings.ItemDropdown({
+        name: "fontFamily",
+        displayName: "Font Family",
+        items: [
+            { value: "Segoe UI", displayName: "Segoe UI" },
+            { value: "Arial", displayName: "Arial" },
+            { value: "Calibri", displayName: "Calibri" },
+            { value: "Verdana", displayName: "Verdana" },
+            { value: "Tahoma", displayName: "Tahoma" },
+            { value: "Trebuchet MS", displayName: "Trebuchet MS" },
+            { value: "Georgia", displayName: "Georgia" },
+            { value: "Times New Roman", displayName: "Times New Roman" },
+            { value: "Courier New", displayName: "Courier New" },
+            { value: "DIN", displayName: "DIN" },
+            { value: "wf_standard-font", displayName: "Power BI Standard" }
+        ],
+        value: { value: "Segoe UI", displayName: "Segoe UI" }
+    });
+
+    name: string = "fontSettings";
+    displayName: string = "Font";
+    slices: Array<FormattingSettingsSlice> = [this.fontFamily];
+}
+
 class ColumnSettingsCard extends FormattingSettingsCard {
     fill = new formattingSettings.ColorPicker({
         name: "fill",
@@ -225,9 +288,16 @@ class XAxisSettingsCard extends FormattingSettingsCard {
         placeholder: "Enter axis title"
     });
 
+    maxWidth = new formattingSettings.NumUpDown({
+        name: "maxWidth",
+        displayName: "Label Max Width (px)",
+        description: "Maximum width for category labels before wrapping. 0 = auto (bandwidth)",
+        value: 0
+    });
+
     name: string = "xAxis";
     displayName: string = "X Axis";
-    slices: Array<FormattingSettingsSlice> = [this.show, this.fontSize, this.fontColor, this.title];
+    slices: Array<FormattingSettingsSlice> = [this.show, this.fontSize, this.fontColor, this.title, this.maxWidth];
 }
 
 class YAxisSettingsCard extends FormattingSettingsCard {
@@ -269,6 +339,8 @@ class YAxisSettingsCard extends FormattingSettingsCard {
 }
 
 export class VisualFormattingSettingsModel extends FormattingSettingsModel {
+    animationCard = new AnimationSettingsCard();
+    fontSettingsCard = new FontSettingsCard();
     columnSettingsCard = new ColumnSettingsCard();
     lineSettingsCard = new LineSettingsCard();
     legendCard = new LegendSettingsCard();
@@ -277,6 +349,7 @@ export class VisualFormattingSettingsModel extends FormattingSettingsModel {
     yAxisCard = new YAxisSettingsCard();
 
     cards = [
+        this.animationCard, this.fontSettingsCard,
         this.columnSettingsCard, this.lineSettingsCard,
         this.legendCard, this.gridlinesCard,
         this.xAxisCard, this.yAxisCard
