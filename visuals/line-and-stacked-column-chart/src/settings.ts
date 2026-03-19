@@ -365,11 +365,18 @@ class YAxisSettingsCard extends FormattingSettingsCard {
     slices: Array<FormattingSettingsSlice> = [this.show, this.fontSize, this.fontColor, this.leftTitle, this.rightTitle];
 }
 
+export class SeriesColorsCard extends FormattingSettingsCard {
+    name: string = "colorSelector";
+    displayName: string = "Series Colors";
+    slices: Array<FormattingSettingsSlice> = [];
+}
+
 export class VisualFormattingSettingsModel extends FormattingSettingsModel {
     animationCard = new AnimationSettingsCard();
     fontSettingsCard = new FontSettingsCard();
     columnSettingsCard = new ColumnSettingsCard();
     lineSettingsCard = new LineSettingsCard();
+    seriesColorsCard = new SeriesColorsCard();
     legendCard = new LegendSettingsCard();
     gridlinesCard = new GridlinesCard();
     xAxisCard = new XAxisSettingsCard();
@@ -378,6 +385,7 @@ export class VisualFormattingSettingsModel extends FormattingSettingsModel {
     cards = [
         this.animationCard, this.fontSettingsCard,
         this.columnSettingsCard, this.lineSettingsCard,
+        this.seriesColorsCard,
         this.legendCard, this.gridlinesCard,
         this.xAxisCard, this.yAxisCard
     ];

@@ -15,7 +15,8 @@ import ISelectionId = powerbi.visuals.ISelectionId;
 import ISelectionManager = powerbi.extensibility.ISelectionManager;
 import VisualUpdateType = powerbi.VisualUpdateType;
 
-import { VisualFormattingSettingsModel } from "./settings";
+import { VisualFormattingSettingsModel, SeriesColorsCard } from "./settings";
+import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -381,6 +382,21 @@ export class Visual implements IVisual {
         // Detect whether a Column Legend grouping is active
         const hasLegend = values && values.source && values.source.roles?.["columnLegend"];
 
+        // Build a map of group color overrides from the grouped() API
+        const groupColorOverrides = new Map<string, string>();
+        if (hasLegend && values && typeof values.grouped === "function") {
+            const groups = values.grouped();
+            for (const group of groups) {
+                const overrideColor = (group.objects as any)?.colorSelector?.fill?.solid?.color;
+                if (overrideColor && group.name != null) {
+                    groupColorOverrides.set(String(group.name), overrideColor);
+                }
+            }
+        }
+
+        // Dynamic series color card slices
+        const seriesColorSlices: formattingSettings.ColorPicker[] = [];
+
         if (values) {
             for (let i = 0; i < values.length; i++) {
                 const col = values[i];
@@ -394,28 +410,64 @@ export class Visual implements IVisual {
                         ? String(col.source.groupName)
                         : col.source.displayName;
 
-                    // Color: use host palette for legend groups, fallback for manual measures
+                    // Check for per-series color override from objects
+                    const objOverride = (col.source.objects as any)?.colorSelector?.fill?.solid?.color
+                        || groupColorOverrides.get(seriesName);
+
+                    // Color priority: user override > host palette (legend) > default color / user setting
                     let color: string;
-                    if (hasLegend && col.source.groupName != null) {
+                    if (objOverride) {
+                        color = objOverride;
+                    } else if (hasLegend && col.source.groupName != null) {
                         color = this.host.colorPalette.getColor(String(col.source.groupName)).value;
                     } else if (columnMeasures.length === 1) {
                         color = userColumnColor;
                     } else {
                         color = DEFAULT_COLUMN_COLORS[(columnMeasures.length - 1) % DEFAULT_COLUMN_COLORS.length];
                     }
+
                     series.push({ name: seriesName, color, type: "column" });
+
+                    // Build a color picker slice for this series
+                    const selector = hasLegend && col.source.groupName != null
+                        ? { data: [{ roles: { columnLegend: true }, key: String(col.source.groupName) }] }
+                        : col.source.queryName ? { metadata: col.source.queryName } : undefined;
+                    seriesColorSlices.push(new formattingSettings.ColorPicker({
+                        name: "fill",
+                        displayName: seriesName,
+                        value: { value: color },
+                        selector: selector as any
+                    }));
                 } else if (roleName?.["lineValues"]) {
                     lineMeasures.push(col);
                     if (!lineFormat && col.source.format) lineFormat = col.source.format;
-                    const color = lineMeasures.length === 1
-                        ? userLineColor
-                        : DEFAULT_LINE_COLORS[(lineMeasures.length - 1) % DEFAULT_LINE_COLORS.length];
+
+                    const objOverride = (col.source.objects as any)?.colorSelector?.fill?.solid?.color;
+                    let color: string;
+                    if (objOverride) {
+                        color = objOverride;
+                    } else if (lineMeasures.length === 1) {
+                        color = userLineColor;
+                    } else {
+                        color = DEFAULT_LINE_COLORS[(lineMeasures.length - 1) % DEFAULT_LINE_COLORS.length];
+                    }
                     series.push({ name: col.source.displayName, color, type: "line" });
+
+                    const selector = col.source.queryName ? { metadata: col.source.queryName } : undefined;
+                    seriesColorSlices.push(new formattingSettings.ColorPicker({
+                        name: "fill",
+                        displayName: col.source.displayName,
+                        value: { value: color },
+                        selector: selector as any
+                    }));
                 } else if (roleName?.["tooltips"]) {
                     tooltipMeasures.push(col);
                 }
             }
         }
+
+        // Populate the dynamic series colors card
+        this.formattingSettings.seriesColorsCard.slices = seriesColorSlices;
 
         const data: ChartDataPoint[] = catValues.map((cat, i) => ({
             category: String(cat),
@@ -432,12 +484,15 @@ export class Visual implements IVisual {
                     format: col.source.format || ""
                 };
             }),
-            lineValues: lineMeasures.map((col, li) => ({
-                name: col.source.displayName,
-                value: Number(col.values[i]) || 0,
-                color: li === 0 ? userLineColor : DEFAULT_LINE_COLORS[li % DEFAULT_LINE_COLORS.length],
-                format: col.source.format || ""
-            })),
+            lineValues: lineMeasures.map((col, li) => {
+                const seriesEntry = series.find(s => s.type === "line" && s.name === col.source.displayName);
+                return {
+                    name: col.source.displayName,
+                    value: Number(col.values[i]) || 0,
+                    color: seriesEntry?.color || (li === 0 ? userLineColor : DEFAULT_LINE_COLORS[li % DEFAULT_LINE_COLORS.length]),
+                    format: col.source.format || ""
+                };
+            }),
             tooltipValues: tooltipMeasures.map(col => ({
                 name: col.source.displayName,
                 value: Number(col.values[i]) || 0,
@@ -620,17 +675,20 @@ export class Visual implements IVisual {
                         .on("mouseout", function () { tooltipDiv.style("display", "none"); });
                     };
 
+                    // Base y position for this segment (top of the segment below)
+                    const baseY = yL(yOff);
+
                     // Helper to animate a bar element (path or rect) based on the chosen style
                     const animateBar = (el: d3.Selection<any, unknown, null, undefined>, isPath: boolean) => {
                         const delay = catIdx * DEFAULT_STAGGER;
                         if (animStyle === "growUp") {
                             if (isPath) {
-                                el.attr("d", roundedTopRect(bX, plotHeight, bW, 0, 0)).style("opacity", 0)
+                                el.attr("d", roundedTopRect(bX, baseY, bW, 0, 0)).style("opacity", 0)
                                     .transition().duration(animDuration).delay(delay)
                                     .ease(d3.easeCubicOut).style("opacity", 0.85)
                                     .attr("d", roundedTopRect(bX, fY, bW, bH, r));
                             } else {
-                                el.attr("y", plotHeight).attr("height", 0).style("opacity", 0)
+                                el.attr("y", baseY).attr("height", 0).style("opacity", 0)
                                     .transition().duration(animDuration).delay(delay)
                                     .ease(d3.easeCubicOut).style("opacity", 0.85)
                                     .attr("y", fY).attr("height", bH);
@@ -657,12 +715,12 @@ export class Visual implements IVisual {
                                 .ease(d3.easeCubicOut).attr("transform", "translate(0, 0)");
                         } else if (animStyle === "bounce") {
                             if (isPath) {
-                                el.attr("d", roundedTopRect(bX, plotHeight, bW, 0, 0)).style("opacity", 0)
+                                el.attr("d", roundedTopRect(bX, baseY, bW, 0, 0)).style("opacity", 0)
                                     .transition().duration(animDuration).delay(delay)
                                     .ease(easeBounce).style("opacity", 0.85)
                                     .attr("d", roundedTopRect(bX, fY, bW, bH, r));
                             } else {
-                                el.attr("y", plotHeight).attr("height", 0).style("opacity", 0)
+                                el.attr("y", baseY).attr("height", 0).style("opacity", 0)
                                     .transition().duration(animDuration).delay(delay)
                                     .ease(easeBounce).style("opacity", 0.85)
                                     .attr("y", fY).attr("height", bH);
