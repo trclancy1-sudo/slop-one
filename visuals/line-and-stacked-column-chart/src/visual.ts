@@ -32,7 +32,7 @@ interface SeriesInfo {
     type: "column" | "line";
 }
 
-type AnimationStyle = "growUp" | "fadeIn" | "spring" | "none";
+type AnimationStyle = "growUp" | "fadeIn" | "spring" | "slideLeft" | "bounce" | "expandCenter" | "none";
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -111,6 +111,16 @@ function easeSpring(t: number): number {
     const a = 1.3;
     const s = p / (2 * Math.PI) * Math.asin(1 / a);
     return a * Math.pow(2, -10 * t) * Math.sin((t - s) * (2 * Math.PI) / p) + 1;
+}
+
+/**
+ * Bounce easing: ball-drop style bouncing at the end.
+ */
+function easeBounce(t: number): number {
+    if (t < 1 / 2.75) return 7.5625 * t * t;
+    if (t < 2 / 2.75) { t -= 1.5 / 2.75; return 7.5625 * t * t + 0.75; }
+    if (t < 2.5 / 2.75) { t -= 2.25 / 2.75; return 7.5625 * t * t + 0.9375; }
+    t -= 2.625 / 2.75; return 7.5625 * t * t + 0.984375;
 }
 
 // ── Visual ─────────────────────────────────────────────────────────
@@ -461,6 +471,7 @@ export class Visual implements IVisual {
         const showYA = this.formattingSettings.yAxisCard.show.value;
         const xFS = this.formattingSettings.xAxisCard.fontSize.value;
         const xFC = this.formattingSettings.xAxisCard.fontColor.value.value;
+        const xFF = this.formattingSettings.xAxisCard.fontFamily.value?.value || "Segoe UI";
         const yFC = this.formattingSettings.yAxisCard.fontColor.value.value;
         const xTitle = this.formattingSettings.xAxisCard.title.value;
         const yLT = this.formattingSettings.yAxisCard.leftTitle.value;
@@ -475,6 +486,7 @@ export class Visual implements IVisual {
                 const textEl = d3.select(this);
                 const fullText = textEl.text();
                 textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
+                    .style("font-family", `"${xFF}", sans-serif`)
                     .attr("transform", "rotate(-35)").style("text-anchor", "end");
 
                 // Split into words and wrap
@@ -575,53 +587,82 @@ export class Visual implements IVisual {
                         .on("mouseout", function () { tooltipDiv.style("display", "none"); });
                     };
 
+                    // Helper to animate a bar element (path or rect) based on the chosen style
+                    const animateBar = (el: d3.Selection<any, unknown, null, undefined>, isPath: boolean) => {
+                        const delay = catIdx * DEFAULT_STAGGER;
+                        if (animStyle === "growUp") {
+                            if (isPath) {
+                                el.attr("d", roundedTopRect(bX, plotHeight, bW, 0, 0)).style("opacity", 0)
+                                    .transition().duration(animDuration).delay(delay)
+                                    .ease(d3.easeCubicOut).style("opacity", 0.85)
+                                    .attr("d", roundedTopRect(bX, fY, bW, bH, r));
+                            } else {
+                                el.attr("y", plotHeight).attr("height", 0).style("opacity", 0)
+                                    .transition().duration(animDuration).delay(delay)
+                                    .ease(d3.easeCubicOut).style("opacity", 0.85)
+                                    .attr("y", fY).attr("height", bH);
+                            }
+                        } else if (animStyle === "spring") {
+                            if (isPath) el.attr("d", roundedTopRect(bX, fY, bW, bH, r));
+                            else el.attr("y", fY).attr("height", bH);
+                            el.style("opacity", 0.85)
+                                .attr("transform", `translate(0, ${bH * 0.15})`)
+                                .transition().duration(animDuration * 0.6)
+                                .ease(easeSpring).attr("transform", "translate(0, 0)");
+                        } else if (animStyle === "fadeIn") {
+                            if (isPath) el.attr("d", roundedTopRect(bX, fY, bW, bH, r));
+                            else el.attr("y", fY).attr("height", bH);
+                            el.style("opacity", 0)
+                                .transition().duration(animDuration).delay(delay)
+                                .style("opacity", 0.85);
+                        } else if (animStyle === "slideLeft") {
+                            if (isPath) el.attr("d", roundedTopRect(bX, fY, bW, bH, r));
+                            else el.attr("y", fY).attr("height", bH);
+                            el.style("opacity", 0.85)
+                                .attr("transform", `translate(${-plotWidth}, 0)`)
+                                .transition().duration(animDuration).delay(delay)
+                                .ease(d3.easeCubicOut).attr("transform", "translate(0, 0)");
+                        } else if (animStyle === "bounce") {
+                            if (isPath) {
+                                el.attr("d", roundedTopRect(bX, plotHeight, bW, 0, 0)).style("opacity", 0)
+                                    .transition().duration(animDuration).delay(delay)
+                                    .ease(easeBounce).style("opacity", 0.85)
+                                    .attr("d", roundedTopRect(bX, fY, bW, bH, r));
+                            } else {
+                                el.attr("y", plotHeight).attr("height", 0).style("opacity", 0)
+                                    .transition().duration(animDuration).delay(delay)
+                                    .ease(easeBounce).style("opacity", 0.85)
+                                    .attr("y", fY).attr("height", bH);
+                            }
+                        } else if (animStyle === "expandCenter") {
+                            // Columns expand from horizontal center
+                            const centerX = bX + bW / 2;
+                            if (isPath) el.attr("d", roundedTopRect(centerX, fY, 0, bH, 0));
+                            else el.attr("x", centerX).attr("width", 0).attr("y", fY).attr("height", bH);
+                            el.style("opacity", 0.85)
+                                .transition().duration(animDuration).delay(delay)
+                                .ease(d3.easeCubicOut)
+                                .attr(isPath ? "d" : "x", isPath ? roundedTopRect(bX, fY, bW, bH, r) : bX);
+                            if (!isPath) el.transition().duration(animDuration).delay(delay)
+                                .ease(d3.easeCubicOut).attr("x", bX).attr("width", bW);
+                        } else {
+                            if (isPath) el.attr("d", roundedTopRect(bX, fY, bW, bH, r));
+                            else el.attr("y", fY).attr("height", bH);
+                            el.style("opacity", 0.85);
+                        }
+                    };
+
                     if (r > 0 && isTop) {
                         const bar = colG.append("path").classed("column-bar", true).attr("fill", cv.color);
                         if (cBW > 0) bar.attr("stroke", cBC).attr("stroke-width", cBW);
                         setupInteractions(bar as unknown as d3.Selection<SVGElement, unknown, null, undefined>);
-
-                        if (animStyle === "growUp") {
-                            bar.attr("d", roundedTopRect(bX, plotHeight, bW, 0, 0)).style("opacity", 0)
-                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
-                                .ease(d3.easeCubicOut).style("opacity", 0.85)
-                                .attr("d", roundedTopRect(bX, fY, bW, bH, r));
-                        } else if (animStyle === "spring") {
-                            bar.attr("d", roundedTopRect(bX, fY, bW, bH, r)).style("opacity", 0.85)
-                                .attr("transform", `translate(0, ${bH * 0.15})`)
-                                .transition().duration(animDuration * 0.6)
-                                .ease(easeSpring)
-                                .attr("transform", "translate(0, 0)");
-                        } else if (animStyle === "fadeIn") {
-                            bar.attr("d", roundedTopRect(bX, fY, bW, bH, r)).style("opacity", 0)
-                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
-                                .style("opacity", 0.85);
-                        } else {
-                            bar.attr("d", roundedTopRect(bX, fY, bW, bH, r)).style("opacity", 0.85);
-                        }
+                        animateBar(bar, true);
                     } else {
                         const rect = colG.append("rect").classed("column-bar", true)
                             .attr("x", bX).attr("width", bW).attr("fill", cv.color);
                         if (cBW > 0) rect.attr("stroke", cBC).attr("stroke-width", cBW);
                         setupInteractions(rect as unknown as d3.Selection<SVGElement, unknown, null, undefined>);
-
-                        if (animStyle === "growUp") {
-                            rect.attr("y", plotHeight).attr("height", 0).style("opacity", 0)
-                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
-                                .ease(d3.easeCubicOut).style("opacity", 0.85)
-                                .attr("y", fY).attr("height", bH);
-                        } else if (animStyle === "spring") {
-                            rect.attr("y", fY).attr("height", bH).style("opacity", 0.85)
-                                .attr("transform", `translate(0, ${bH * 0.15})`)
-                                .transition().duration(animDuration * 0.6)
-                                .ease(easeSpring)
-                                .attr("transform", "translate(0, 0)");
-                        } else if (animStyle === "fadeIn") {
-                            rect.attr("y", fY).attr("height", bH).style("opacity", 0)
-                                .transition().duration(animDuration).delay(catIdx * DEFAULT_STAGGER)
-                                .style("opacity", 0.85);
-                        } else {
-                            rect.attr("y", fY).attr("height", bH).style("opacity", 0.85);
-                        }
+                        animateBar(rect, false);
                     }
 
                     // Data labels — repositioned to avoid cutoff at edges
@@ -702,12 +743,18 @@ export class Visual implements IVisual {
 
                 if (lDash !== "none") {
                     path.attr("stroke-dasharray", lDash);
-                } else if (animStyle === "growUp") {
+                } else if (animStyle === "growUp" || animStyle === "slideLeft") {
+                    // Line draw effect — stroke progressively reveals
                     const node = path.node() as SVGPathElement;
                     const len = node.getTotalLength();
                     path.attr("stroke-dasharray", len).attr("stroke-dashoffset", len)
                         .transition().duration(entrLineD).ease(d3.easeLinear).attr("stroke-dashoffset", 0);
-                } else if (animStyle === "fadeIn") {
+                } else if (animStyle === "bounce") {
+                    const node = path.node() as SVGPathElement;
+                    const len = node.getTotalLength();
+                    path.attr("stroke-dasharray", len).attr("stroke-dashoffset", len)
+                        .transition().duration(entrLineD).ease(easeBounce).attr("stroke-dashoffset", 0);
+                } else if (animStyle === "fadeIn" || animStyle === "expandCenter") {
                     path.style("opacity", 0).transition().duration(animDuration).style("opacity", 1);
                 }
 
@@ -732,10 +779,10 @@ export class Visual implements IVisual {
                         })
                         .on("mouseout", function () { tooltipDiv.style("display", "none"); });
 
-                        if (animStyle === "growUp") {
+                        const mDelay = (i / (data.length - 1 || 1)) * entrLineD;
+                        if (animStyle === "growUp" || animStyle === "expandCenter") {
                             marker.attr("cy", cy).attr("r", 0)
-                                .transition().duration(200)
-                                .delay((i / (data.length - 1 || 1)) * entrLineD)
+                                .transition().duration(200).delay(mDelay)
                                 .ease(d3.easeBackOut).attr("r", mSize);
                         } else if (animStyle === "spring") {
                             marker.attr("cy", cy - 20).attr("r", mSize)
@@ -743,9 +790,17 @@ export class Visual implements IVisual {
                                 .ease(easeSpring).attr("cy", cy);
                         } else if (animStyle === "fadeIn") {
                             marker.attr("cy", cy).attr("r", mSize).style("opacity", 0)
-                                .transition().duration(animDuration)
-                                .delay((i / (data.length - 1 || 1)) * entrLineD)
+                                .transition().duration(animDuration).delay(mDelay)
                                 .style("opacity", 1);
+                        } else if (animStyle === "slideLeft") {
+                            marker.attr("cy", cy).attr("r", mSize)
+                                .attr("cx", -mSize)
+                                .transition().duration(animDuration).delay(mDelay)
+                                .ease(d3.easeCubicOut).attr("cx", cx);
+                        } else if (animStyle === "bounce") {
+                            marker.attr("cy", cy).attr("r", 0)
+                                .transition().duration(300).delay(mDelay)
+                                .ease(easeBounce).attr("r", mSize);
                         } else {
                             marker.attr("cy", cy).attr("r", mSize);
                         }

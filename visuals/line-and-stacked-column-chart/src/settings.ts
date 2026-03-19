@@ -6,17 +6,54 @@ import FormattingSettingsCard = formattingSettings.SimpleCard;
 import FormattingSettingsSlice = formattingSettings.Slice;
 import FormattingSettingsModel = formattingSettings.Model;
 
+const FONT_ITEMS = [
+    { value: "Segoe UI", displayName: "Segoe UI" },
+    { value: "Segoe UI Light", displayName: "Segoe UI Light" },
+    { value: "Segoe UI Semibold", displayName: "Segoe UI Semibold" },
+    { value: "Segoe UI Bold", displayName: "Segoe UI Bold" },
+    { value: "Arial", displayName: "Arial" },
+    { value: "Arial Black", displayName: "Arial Black" },
+    { value: "Arial Unicode MS", displayName: "Arial Unicode MS" },
+    { value: "Calibri", displayName: "Calibri" },
+    { value: "Calibri Light", displayName: "Calibri Light" },
+    { value: "Cambria", displayName: "Cambria" },
+    { value: "Candara", displayName: "Candara" },
+    { value: "Comic Sans MS", displayName: "Comic Sans MS" },
+    { value: "Consolas", displayName: "Consolas" },
+    { value: "Constantia", displayName: "Constantia" },
+    { value: "Corbel", displayName: "Corbel" },
+    { value: "Courier New", displayName: "Courier New" },
+    { value: "DIN", displayName: "DIN" },
+    { value: "Franklin Gothic", displayName: "Franklin Gothic" },
+    { value: "Franklin Gothic Book", displayName: "Franklin Gothic Book" },
+    { value: "Georgia", displayName: "Georgia" },
+    { value: "Impact", displayName: "Impact" },
+    { value: "Lucida Console", displayName: "Lucida Console" },
+    { value: "Lucida Sans Unicode", displayName: "Lucida Sans Unicode" },
+    { value: "Palatino Linotype", displayName: "Palatino Linotype" },
+    { value: "Tahoma", displayName: "Tahoma" },
+    { value: "Times New Roman", displayName: "Times New Roman" },
+    { value: "Trebuchet MS", displayName: "Trebuchet MS" },
+    { value: "Verdana", displayName: "Verdana" },
+    { value: "wf_standard-font", displayName: "Power BI Standard" }
+];
+
+const ANIMATION_ITEMS = [
+    { value: "growUp", displayName: "Grow Up" },
+    { value: "fadeIn", displayName: "Fade In" },
+    { value: "spring", displayName: "Spring" },
+    { value: "slideLeft", displayName: "Slide Left" },
+    { value: "bounce", displayName: "Bounce" },
+    { value: "expandCenter", displayName: "Expand from Center" },
+    { value: "none", displayName: "None" }
+];
+
 class AnimationSettingsCard extends FormattingSettingsCard {
     entranceStyle = new formattingSettings.ItemDropdown({
         name: "entranceStyle",
         displayName: "Entrance Animation",
         description: "Animation when visual first appears (page navigation, bookmarks)",
-        items: [
-            { value: "growUp", displayName: "Grow Up" },
-            { value: "fadeIn", displayName: "Fade In" },
-            { value: "spring", displayName: "Spring" },
-            { value: "none", displayName: "None" }
-        ],
+        items: ANIMATION_ITEMS,
         value: { value: "growUp", displayName: "Grow Up" }
     });
 
@@ -24,12 +61,7 @@ class AnimationSettingsCard extends FormattingSettingsCard {
         name: "crossFilterStyle",
         displayName: "Cross-Filter Animation",
         description: "Animation when data changes via cross-filtering from another visual",
-        items: [
-            { value: "spring", displayName: "Spring" },
-            { value: "growUp", displayName: "Grow Up" },
-            { value: "fadeIn", displayName: "Fade In" },
-            { value: "none", displayName: "None" }
-        ],
+        items: ANIMATION_ITEMS,
         value: { value: "spring", displayName: "Spring" }
     });
 
@@ -48,37 +80,7 @@ class FontSettingsCard extends FormattingSettingsCard {
     fontFamily = new formattingSettings.ItemDropdown({
         name: "fontFamily",
         displayName: "Font Family",
-        items: [
-            { value: "Segoe UI", displayName: "Segoe UI" },
-            { value: "Segoe UI Light", displayName: "Segoe UI Light" },
-            { value: "Segoe UI Semibold", displayName: "Segoe UI Semibold" },
-            { value: "Segoe UI Bold", displayName: "Segoe UI Bold" },
-            { value: "Arial", displayName: "Arial" },
-            { value: "Arial Black", displayName: "Arial Black" },
-            { value: "Arial Unicode MS", displayName: "Arial Unicode MS" },
-            { value: "Calibri", displayName: "Calibri" },
-            { value: "Calibri Light", displayName: "Calibri Light" },
-            { value: "Cambria", displayName: "Cambria" },
-            { value: "Candara", displayName: "Candara" },
-            { value: "Comic Sans MS", displayName: "Comic Sans MS" },
-            { value: "Consolas", displayName: "Consolas" },
-            { value: "Constantia", displayName: "Constantia" },
-            { value: "Corbel", displayName: "Corbel" },
-            { value: "Courier New", displayName: "Courier New" },
-            { value: "DIN", displayName: "DIN" },
-            { value: "Franklin Gothic", displayName: "Franklin Gothic" },
-            { value: "Franklin Gothic Book", displayName: "Franklin Gothic Book" },
-            { value: "Georgia", displayName: "Georgia" },
-            { value: "Impact", displayName: "Impact" },
-            { value: "Lucida Console", displayName: "Lucida Console" },
-            { value: "Lucida Sans Unicode", displayName: "Lucida Sans Unicode" },
-            { value: "Palatino Linotype", displayName: "Palatino Linotype" },
-            { value: "Tahoma", displayName: "Tahoma" },
-            { value: "Times New Roman", displayName: "Times New Roman" },
-            { value: "Trebuchet MS", displayName: "Trebuchet MS" },
-            { value: "Verdana", displayName: "Verdana" },
-            { value: "wf_standard-font", displayName: "Power BI Standard" }
-        ],
+        items: FONT_ITEMS,
         value: { value: "Segoe UI", displayName: "Segoe UI" }
     });
 
@@ -287,6 +289,13 @@ class XAxisSettingsCard extends FormattingSettingsCard {
         value: true
     });
 
+    fontFamily = new formattingSettings.ItemDropdown({
+        name: "fontFamily",
+        displayName: "Font Family",
+        items: FONT_ITEMS,
+        value: { value: "Segoe UI", displayName: "Segoe UI" }
+    });
+
     fontSize = new formattingSettings.NumUpDown({
         name: "fontSize",
         displayName: "Text Size",
@@ -315,7 +324,7 @@ class XAxisSettingsCard extends FormattingSettingsCard {
 
     name: string = "xAxis";
     displayName: string = "X Axis";
-    slices: Array<FormattingSettingsSlice> = [this.show, this.fontSize, this.fontColor, this.title, this.maxWidth];
+    slices: Array<FormattingSettingsSlice> = [this.show, this.fontFamily, this.fontSize, this.fontColor, this.title, this.maxWidth];
 }
 
 class YAxisSettingsCard extends FormattingSettingsCard {
