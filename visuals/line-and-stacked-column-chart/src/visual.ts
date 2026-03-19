@@ -41,54 +41,84 @@ function getDashArray(style: string, width: number): string {
 }
 
 /**
- * Auto-format a numeric value using its Power BI format string.
- * Falls back to smart formatting (K/M/B) if no format is available.
+ * Detect format type from a Power BI format string.
  */
-function autoFormatValue(value: number, formatString: string): string {
-    if (formatString) {
-        const isPercent = formatString.includes("%");
-        const isCurrency = formatString.includes("$") || formatString.includes("£") || formatString.includes("€");
-        // Extract decimal places from format string like "0.00" or "#,##0.0"
-        const decMatch = formatString.match(/\.(0+|#+)/);
-        const decimals = decMatch ? decMatch[1].length : (isPercent ? 1 : 0);
-
-        if (isPercent) {
-            // Power BI stores percentages as decimals (0.5 = 50%)
-            return (value * 100).toFixed(decimals) + "%";
-        }
-
-        const currSymbol = isCurrency
-            ? (formatString.includes("£") ? "£" : formatString.includes("€") ? "€" : "$")
-            : "";
-
-        if (isCurrency) {
-            return currSymbol + compactNumber(value, decimals > 0 ? decimals : 2);
-        }
-
-        // Has explicit format but not % or $: use decimal precision from format
-        if (decMatch) {
-            return compactNumber(value, decimals);
-        }
-    }
-
-    // No format string — smart compact formatting
-    return compactNumber(value, 1);
+interface FormatInfo {
+    isPercent: boolean;
+    isCurrency: boolean;
+    currSymbol: string;
 }
 
-function compactNumber(value: number, decimals: number): string {
-    const abs = Math.abs(value);
-    if (abs >= 1e9) return (value / 1e9).toFixed(decimals) + "B";
-    if (abs >= 1e6) return (value / 1e6).toFixed(decimals) + "M";
-    if (abs >= 1e3) return (value / 1e3).toFixed(decimals) + "K";
-    if (Number.isInteger(value)) return value.toLocaleString();
-    return value.toFixed(decimals);
+function parseFormatInfo(formatString: string): FormatInfo {
+    const isPercent = formatString.includes("%");
+    const isCurrency = formatString.includes("$") || formatString.includes("£") || formatString.includes("€");
+    const currSymbol = isCurrency
+        ? (formatString.includes("£") ? "£" : formatString.includes("€") ? "€" : "$")
+        : "";
+    return { isPercent, isCurrency, currSymbol };
 }
 
 /**
- * Create a d3 axis tick formatter that auto-formats based on the range of values.
+ * Smart compact number formatting like Power BI.
+ * Keeps axis labels clean: max 1 decimal for axis, respects format for data labels.
  */
-function axisFormatter(formatString: string): (value: number) => string {
-    return (value: number) => autoFormatValue(value, formatString);
+function compactNumber(value: number, maxDecimals: number): string {
+    const abs = Math.abs(value);
+    let scaled: number;
+    let suffix: string;
+
+    if (abs >= 1e9) { scaled = value / 1e9; suffix = "B"; }
+    else if (abs >= 1e6) { scaled = value / 1e6; suffix = "M"; }
+    else if (abs >= 1e3) { scaled = value / 1e3; suffix = "K"; }
+    else { scaled = value; suffix = ""; }
+
+    // Trim trailing zeros: 1.0K -> 1K, 2.50M -> 2.5M
+    const fixed = scaled.toFixed(maxDecimals);
+    const trimmed = suffix ? fixed.replace(/\.?0+$/, "") : fixed.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+    return trimmed + suffix;
+}
+
+/**
+ * Format a value for display on data labels (full precision).
+ */
+function formatDataLabel(value: number, formatString: string): string {
+    const info = parseFormatInfo(formatString);
+
+    if (info.isPercent) {
+        return (value * 100).toFixed(1).replace(/\.0$/, "") + "%";
+    }
+    if (info.isCurrency) {
+        return info.currSymbol + compactNumber(value, 2);
+    }
+    return compactNumber(value, 1);
+}
+
+/**
+ * Format a value for axis ticks (minimal precision, like Power BI).
+ * Power BI typically shows 0-1 decimal places on axes.
+ */
+function formatAxisTick(value: number, formatString: string): string {
+    const info = parseFormatInfo(formatString);
+
+    if (info.isPercent) {
+        const pctVal = value * 100;
+        return (Number.isInteger(pctVal) ? pctVal.toString() : pctVal.toFixed(1)) + "%";
+    }
+    if (info.isCurrency) {
+        return info.currSymbol + compactNumber(value, 1);
+    }
+    return compactNumber(value, 1);
+}
+
+/**
+ * Compute a sensible tick count based on available axis height,
+ * similar to how Power BI avoids crowded axes.
+ */
+function smartTickCount(axisLength: number, fontSize: number): number {
+    // Roughly 30-40px per tick at default font size, scale with font
+    const pixelsPerTick = Math.max(30, fontSize * 2.5);
+    const count = Math.floor(axisLength / pixelsPerTick);
+    return Math.max(2, Math.min(count, 10));
 }
 
 /**
@@ -96,8 +126,12 @@ function axisFormatter(formatString: string): (value: number) => string {
  * Returns an SVG path string.
  */
 function roundedTopRect(x: number, y: number, w: number, h: number, r: number): string {
+    if (h <= 0) {
+        // Return an empty/invisible path to avoid rendering a line during animation
+        return "M0,0";
+    }
     r = Math.min(r, w / 2, h);
-    if (r <= 0 || h <= 0) {
+    if (r <= 0) {
         return `M${x},${y}h${w}v${h}h${-w}Z`;
     }
     return `M${x},${y + r}`
@@ -325,7 +359,8 @@ export class Visual implements IVisual {
 
         if (gridSettings.showHorizontal.value) {
             const gridGroup = this.chartGroup.append("g").classed("gridlines-h", true);
-            yScaleLeft.ticks(6).forEach(t => {
+            const yFontSizeForGrid = this.formattingSettings.yAxisCard.fontSize.value;
+            yScaleLeft.ticks(smartTickCount(plotHeight, yFontSizeForGrid)).forEach(t => {
                 gridGroup.append("line")
                     .attr("x1", 0).attr("x2", plotWidth)
                     .attr("y1", yScaleLeft(t)).attr("y2", yScaleLeft(t))
@@ -383,12 +418,13 @@ export class Visual implements IVisual {
 
         if (showYAxis) {
             if (data.some(d => d.columnValues.length > 0)) {
+                const leftTickCount = smartTickCount(plotHeight, yFontSize);
                 this.chartGroup.append("g")
                     .classed("axis y-axis-left", true)
                     .call(
                         d3.axisLeft(yScaleLeft)
-                            .ticks(6)
-                            .tickFormat(d => axisFormatter(columnFormat)(d as number))
+                            .ticks(leftTickCount)
+                            .tickFormat(d => formatAxisTick(d as number, columnFormat))
                     )
                     .selectAll("text")
                     .style("font-size", `${yFontSize}px`)
@@ -408,13 +444,14 @@ export class Visual implements IVisual {
             }
 
             if (data.some(d => d.lineValues.length > 0)) {
+                const rightTickCount = smartTickCount(plotHeight, yFontSize);
                 this.chartGroup.append("g")
                     .classed("axis y-axis-right", true)
                     .attr("transform", `translate(${plotWidth},0)`)
                     .call(
                         d3.axisRight(yScaleRight)
-                            .ticks(6)
-                            .tickFormat(d => axisFormatter(lineFormat)(d as number))
+                            .ticks(rightTickCount)
+                            .tickFormat(d => formatAxisTick(d as number, lineFormat))
                     )
                     .selectAll("text")
                     .style("font-size", `${yFontSize}px`)
@@ -464,7 +501,8 @@ export class Visual implements IVisual {
                         const bar = columnGroup.append("path")
                             .classed("column-bar", true)
                             .attr("d", roundedTopRect(barX, plotHeight, barW, 0, 0))
-                            .attr("fill", cv.color);
+                            .attr("fill", cv.color)
+                            .style("opacity", 0);
 
                         if (colBorderWidth > 0) {
                             bar.attr("stroke", colBorderColor).attr("stroke-width", colBorderWidth);
@@ -477,7 +515,7 @@ export class Visual implements IVisual {
                         })
                         .on("mouseover", function (event: MouseEvent) {
                             tooltipDiv.style("display", "block")
-                                .html(`<strong>${d.category}</strong><br/>${cv.name}: ${autoFormatValue(cv.value, cv.format)}`);
+                                .html(`<strong>${d.category}</strong><br/>${cv.name}: ${formatDataLabel(cv.value, cv.format)}`);
                         })
                         .on("mousemove", function (event: MouseEvent) {
                             tooltipDiv.style("left", `${event.offsetX + 12}px`).style("top", `${event.offsetY - 28}px`);
@@ -488,6 +526,7 @@ export class Visual implements IVisual {
                             .duration(Visual.ANIMATION_DURATION)
                             .delay(catIndex * Visual.ANIMATION_STAGGER)
                             .ease(d3.easeCubicOut)
+                            .style("opacity", 0.85)
                             .attr("d", roundedTopRect(barX, finalY, barW, barHeight, r));
                     } else {
                         // Use rect for non-rounded segments
@@ -495,7 +534,8 @@ export class Visual implements IVisual {
                             .classed("column-bar", true)
                             .attr("x", barX).attr("y", plotHeight)
                             .attr("width", barW).attr("height", 0)
-                            .attr("fill", cv.color);
+                            .attr("fill", cv.color)
+                            .style("opacity", 0);
 
                         if (colBorderWidth > 0) {
                             rect.attr("stroke", colBorderColor).attr("stroke-width", colBorderWidth);
@@ -508,7 +548,7 @@ export class Visual implements IVisual {
                         })
                         .on("mouseover", function (event: MouseEvent) {
                             tooltipDiv.style("display", "block")
-                                .html(`<strong>${d.category}</strong><br/>${cv.name}: ${autoFormatValue(cv.value, cv.format)}`);
+                                .html(`<strong>${d.category}</strong><br/>${cv.name}: ${formatDataLabel(cv.value, cv.format)}`);
                         })
                         .on("mousemove", function (event: MouseEvent) {
                             tooltipDiv.style("left", `${event.offsetX + 12}px`).style("top", `${event.offsetY - 28}px`);
@@ -519,6 +559,7 @@ export class Visual implements IVisual {
                             .duration(Visual.ANIMATION_DURATION)
                             .delay(catIndex * Visual.ANIMATION_STAGGER)
                             .ease(d3.easeCubicOut)
+                            .style("opacity", 0.85)
                             .attr("y", finalY).attr("height", barHeight);
                     }
 
@@ -533,7 +574,7 @@ export class Visual implements IVisual {
                             .style("fill", colLabelColor)
                             .style("pointer-events", "none")
                             .style("opacity", 0)
-                            .text(autoFormatValue(cv.value, cv.format))
+                            .text(formatDataLabel(cv.value, cv.format))
                             .transition()
                             .duration(Visual.ANIMATION_DURATION)
                             .delay(catIndex * Visual.ANIMATION_STAGGER)
@@ -630,7 +671,7 @@ export class Visual implements IVisual {
                         })
                         .on("mouseover", function (event: MouseEvent) {
                             tooltipDiv.style("display", "block")
-                                .html(`<strong>${d.category}</strong><br/>${d.lineValues[li].name}: ${autoFormatValue(d.lineValues[li].value, fmt)}`);
+                                .html(`<strong>${d.category}</strong><br/>${d.lineValues[li].name}: ${formatDataLabel(d.lineValues[li].value, fmt)}`);
                         })
                         .on("mousemove", function (event: MouseEvent) {
                             tooltipDiv.style("left", `${event.offsetX + 12}px`).style("top", `${event.offsetY - 28}px`);
@@ -656,7 +697,7 @@ export class Visual implements IVisual {
                             .style("fill", lineLabelColor)
                             .style("pointer-events", "none")
                             .style("opacity", 0)
-                            .text(autoFormatValue(d.lineValues[li].value, fmt))
+                            .text(formatDataLabel(d.lineValues[li].value, fmt))
                             .transition()
                             .duration(200)
                             .delay((i / (data.length - 1 || 1)) * lineDuration)
