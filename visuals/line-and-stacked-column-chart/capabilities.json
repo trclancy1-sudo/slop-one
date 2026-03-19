@@ -1,20 +1,28 @@
 {
     "dataRoles": [
         {
-            "displayName": "Category Data",
+            "displayName": "Axis",
             "name": "category",
-            "kind": "Grouping"
+            "kind": "Grouping",
+            "description": "The categorical axis (e.g. months, regions)"
         },
         {
-            "displayName": "Measure Data",
-            "name": "measure",
-            "kind": "Measure"
+            "displayName": "Column Values",
+            "name": "columnValues",
+            "kind": "Measure",
+            "description": "Measures displayed as stacked columns"
+        },
+        {
+            "displayName": "Line Values",
+            "name": "lineValues",
+            "kind": "Measure",
+            "description": "Measures displayed as lines"
         }
     ],
     "objects": {
-        "dataPoint": {
+        "columnSettings": {
             "properties": {
-                "defaultColor": {
+                "fill": {
                     "type": {
                         "fill": {
                             "solid": {
@@ -22,12 +30,11 @@
                             }
                         }
                     }
-                },
-                "showAllDataPoints": {
-                    "type": {
-                        "bool": true
-                    }
-                },
+                }
+            }
+        },
+        "lineSettings": {
+            "properties": {
                 "fill": {
                     "type": {
                         "fill": {
@@ -37,12 +44,58 @@
                         }
                     }
                 },
-                "fillRule": {
+                "strokeWidth": {
                     "type": {
-                        "fill": {}
+                        "numeric": true
                     }
                 },
-                 "fontSize": {
+                "showMarkers": {
+                    "type": {
+                        "bool": true
+                    }
+                }
+            }
+        },
+        "legend": {
+            "properties": {
+                "show": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "fontSize": {
+                    "type": {
+                        "formatting": {
+                            "fontSize": true
+                        }
+                    }
+                }
+            }
+        },
+        "xAxis": {
+            "properties": {
+                "show": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "fontSize": {
+                    "type": {
+                        "formatting": {
+                            "fontSize": true
+                        }
+                    }
+                }
+            }
+        },
+        "yAxis": {
+            "properties": {
+                "show": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "fontSize": {
                     "type": {
                         "formatting": {
                             "fontSize": true
@@ -54,20 +107,32 @@
     },
     "dataViewMappings": [
         {
+            "conditions": [
+                {
+                    "category": { "max": 1 },
+                    "columnValues": { "min": 0 },
+                    "lineValues": { "min": 0 }
+                }
+            ],
             "categorical": {
                 "categories": {
                     "for": {
                         "in": "category"
                     },
                     "dataReductionAlgorithm": {
-                        "top": {}
+                        "top": { "count": 1000 }
                     }
                 },
                 "values": {
                     "select": [
                         {
-                            "bind": {
-                                "to": "measure"
+                            "for": {
+                                "in": "columnValues"
+                            }
+                        },
+                        {
+                            "for": {
+                                "in": "lineValues"
                             }
                         }
                     ]

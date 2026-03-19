@@ -1,29 +1,3 @@
-/*
- *  Power BI Visualizations
- *
- *  Copyright (c) Microsoft Corporation
- *  All rights reserved.
- *  MIT License
- *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the ""Software""), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in
- *  all copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- *  THE SOFTWARE.
- */
-
 "use strict";
 
 import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
@@ -32,52 +6,102 @@ import FormattingSettingsCard = formattingSettings.SimpleCard;
 import FormattingSettingsSlice = formattingSettings.Slice;
 import FormattingSettingsModel = formattingSettings.Model;
 
-/**
- * Data Point Formatting Card
- */
-class DataPointCardSettings extends FormattingSettingsCard {
-    defaultColor = new formattingSettings.ColorPicker({
-        name: "defaultColor",
-        displayName: "Default color",
-        value: { value: "" }
+class ColumnSettingsCard extends FormattingSettingsCard {
+    fill = new formattingSettings.ColorPicker({
+        name: "fill",
+        displayName: "Default Column Color",
+        value: { value: "#4682B4" }
     });
 
-    showAllDataPoints = new formattingSettings.ToggleSwitch({
-        name: "showAllDataPoints",
-        displayName: "Show all",
+    name: string = "columnSettings";
+    displayName: string = "Column Settings";
+    slices: Array<FormattingSettingsSlice> = [this.fill];
+}
+
+class LineSettingsCard extends FormattingSettingsCard {
+    fill = new formattingSettings.ColorPicker({
+        name: "fill",
+        displayName: "Default Line Color",
+        value: { value: "#FF6347" }
+    });
+
+    strokeWidth = new formattingSettings.NumUpDown({
+        name: "strokeWidth",
+        displayName: "Line Width",
+        value: 2
+    });
+
+    showMarkers = new formattingSettings.ToggleSwitch({
+        name: "showMarkers",
+        displayName: "Show Data Points",
         value: true
     });
 
-    fill = new formattingSettings.ColorPicker({
-        name: "fill",
-        displayName: "Fill",
-        value: { value: "" }
-    });
+    name: string = "lineSettings";
+    displayName: string = "Line Settings";
+    slices: Array<FormattingSettingsSlice> = [this.fill, this.strokeWidth, this.showMarkers];
+}
 
-    fillRule = new formattingSettings.ColorPicker({
-        name: "fillRule",
-        displayName: "Color saturation",
-        value: { value: "" }
+class LegendSettingsCard extends FormattingSettingsCard {
+    show = new formattingSettings.ToggleSwitch({
+        name: "show",
+        displayName: "Show Legend",
+        value: true
     });
 
     fontSize = new formattingSettings.NumUpDown({
         name: "fontSize",
         displayName: "Text Size",
-        value: 12
+        value: 11
     });
 
-    name: string = "dataPoint";
-    displayName: string = "Data colors";
-    slices: Array<FormattingSettingsSlice> = [this.defaultColor, this.showAllDataPoints, this.fill, this.fillRule, this.fontSize];
+    name: string = "legend";
+    displayName: string = "Legend";
+    slices: Array<FormattingSettingsSlice> = [this.show, this.fontSize];
 }
 
-/**
-* visual settings model class
-*
-*/
-export class VisualFormattingSettingsModel extends FormattingSettingsModel {
-    // Create formatting settings model formatting cards
-    dataPointCard = new DataPointCardSettings();
+class XAxisSettingsCard extends FormattingSettingsCard {
+    show = new formattingSettings.ToggleSwitch({
+        name: "show",
+        displayName: "Show X Axis",
+        value: true
+    });
 
-    cards = [this.dataPointCard];
+    fontSize = new formattingSettings.NumUpDown({
+        name: "fontSize",
+        displayName: "Text Size",
+        value: 11
+    });
+
+    name: string = "xAxis";
+    displayName: string = "X Axis";
+    slices: Array<FormattingSettingsSlice> = [this.show, this.fontSize];
+}
+
+class YAxisSettingsCard extends FormattingSettingsCard {
+    show = new formattingSettings.ToggleSwitch({
+        name: "show",
+        displayName: "Show Y Axis",
+        value: true
+    });
+
+    fontSize = new formattingSettings.NumUpDown({
+        name: "fontSize",
+        displayName: "Text Size",
+        value: 11
+    });
+
+    name: string = "yAxis";
+    displayName: string = "Y Axis";
+    slices: Array<FormattingSettingsSlice> = [this.show, this.fontSize];
+}
+
+export class VisualFormattingSettingsModel extends FormattingSettingsModel {
+    columnSettingsCard = new ColumnSettingsCard();
+    lineSettingsCard = new LineSettingsCard();
+    legendCard = new LegendSettingsCard();
+    xAxisCard = new XAxisSettingsCard();
+    yAxisCard = new YAxisSettingsCard();
+
+    cards = [this.columnSettingsCard, this.lineSettingsCard, this.legendCard, this.xAxisCard, this.yAxisCard];
 }
