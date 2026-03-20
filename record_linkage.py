@@ -23,28 +23,28 @@ import splink.comparison_library as cl
 
 # --- File paths --------------------------------------------------------------
 GROUP_A_FILES = [
-    "group_a_file1.xlsx",   # First file for Group A
-    "group_a_file2.xlsx",   # Second file for Group A
+    r"GBS Client.xlsx",   # First file for Group A
+    r"GBS WIN.xlsx",   # Second file for Group A
 ]
 
 GROUP_B_FILES = [
-    "group_b_file1.xlsx",   # First file for Group B
-    "group_b_file2.xlsx",   # Second file for Group B
+    r"GGB Client.xlsx",   # First file for Group B
+    r"GGB WIN.xlsx",   # Second file for Group B
 ]
 
 # --- Column name mapping (set to None if column doesn't exist) ---------------
 # Map your actual column names to the standard names used by the script.
 
 GROUP_A_COLUMNS = {
-    "key":      "KEY",          # Shared key column (set None if absent)
-    "name":     "CLIENT_NAME",  # Client name column
-    "postcode": "POSTCODE",     # Postcode column
+    "key":      "DUNS",          # Shared key column (set None if absent)
+    "name":     "Client_Name",  # Client name column
+    "postcode": "Postal_Code",     # Postcode column
 }
 
 GROUP_B_COLUMNS = {
-    "key":      "KEY",          # Shared key column (set None if absent)
-    "name":     "CLIENT_NAME",  # Client name column
-    "postcode": "POSTCODE",     # Postcode column
+    "key":      "DUNS",          # Shared key column (set None if absent)
+    "name":     "Client_Name",  # Client name column
+    "postcode": "Postal_Code",     # Postcode column
 }
 
 # --- Matching thresholds -----------------------------------------------------
@@ -277,12 +277,18 @@ def probabilistic_match(df_a, df_b):
     linker.training.estimate_u_using_random_sampling(max_pairs=1_000_000)
 
     if has_name:
-        try:
-            linker.training.estimate_parameters_using_expectation_maximisation(
-                block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
-            )
-        except Exception:
-            pass  # Fall back to u-only estimates
+    try:
+        # First pass — train on postcode sector blocks
+        linker.training.estimate_parameters_using_expectation_maximisation(
+            block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
+        )
+        # Second pass — train on name prefix blocks to improve name u-values
+        linker.training.estimate_parameters_using_expectation_maximisation(
+            block_on("substr(name_clean, 1, 3)")
+        )
+    except Exception:
+        pass # Fall back to u-only estimates
+
 
     print("  Generating predictions...")
     predictions = linker.inference.predict(threshold_match_probability=THRESHOLD_LOW)
