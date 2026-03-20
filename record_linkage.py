@@ -50,8 +50,13 @@ GROUP_B_COLUMNS = {
 # --- Matching thresholds -----------------------------------------------------
 # Splink produces a match probability between 0 and 1.
 # Pairs above HIGH are auto-accepted; below LOW are discarded; between = review.
-THRESHOLD_HIGH = 0.90   # Auto-accept above this
-THRESHOLD_LOW  = 0.40   # Discard below this (middle band flagged for review)
+THRESHOLD_HIGH = 0.95       # Auto-accept above this
+THRESHOLD_LOW  = 0.40       # Discard below this (middle band flagged for review)
+
+# Minimum Jaro-Winkler name similarity for a pair to auto-accept.
+# Pairs scoring below this are demoted to Review even if Splink score is high.
+# 0.80 = names must be at least 80% similar. Raise to be stricter.
+MIN_NAME_SIMILARITY = 0.80
 
 # --- Output ------------------------------------------------------------------
 OUTPUT_FILE = "matched_clients.xlsx"
@@ -307,9 +312,25 @@ def format_predictions(df_pred, df_a, df_b):
         rec_a = a_lookup.loc[uid_a] if uid_a in a_lookup.index else pd.Series()
         rec_b = b_lookup.loc[uid_b] if uid_b in b_lookup.index else pd.Series()
 
+        # Name similarity guard — demote to Review if names are too dissimilar
+        # regardless of Splink score (prevents postcode-only auto-accepts)
+        band = "Auto-Accept" if score >= THRESHOLD_HIGH else "Review"
+        if band == "Auto-Accept":
+            name_a_clean = rec_a.get("name_clean")
+            name_b_clean = rec_b.get("name_clean")
+            if name_a_clean and name_b_clean:
+                from rapidfuzz.distance import JaroWinkler
+                name_sim = JaroWinkler.similarity(name_a_clean, name_b_clean)
+                if name_sim < MIN_NAME_SIMILARITY:
+                    band = "Review"
+
         rows.append({
             "match_score":      score,
-            "match_band":       "Auto-Accept" if score >= THRESHOLD_HIGH else "Review",
+            "match_band":       band,
+            "name_similarity":  round(JaroWinkler.similarity(
+                                    str(rec_a.get("name_clean") or ""),
+                                    str(rec_b.get("name_clean") or "")
+                                ), 4),
             "name_A":           rec_a.get("name"),
             "name_B":           rec_b.get("name"),
             "postcode_A":       rec_a.get("postcode"),
