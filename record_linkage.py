@@ -485,8 +485,8 @@ def main_powerbi():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    main()
+    # Always create 'dataset' so Power BI can find it regardless of how
+    # the script is invoked (__name__ may be "__main__" in Power BI too).
+    dataset = main_powerbi()
 else:
-    # Power BI executes the script but __name__ != "__main__".
-    # Expose the result as a top-level DataFrame so Power Query can find it.
     dataset = main_powerbi()
