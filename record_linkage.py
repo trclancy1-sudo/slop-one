@@ -277,17 +277,17 @@ def probabilistic_match(df_a, df_b):
     linker.training.estimate_u_using_random_sampling(max_pairs=1_000_000)
 
     if has_name:
-    try:
-        # First pass — train on postcode sector blocks
-        linker.training.estimate_parameters_using_expectation_maximisation(
-            block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
-        )
-        # Second pass — train on name prefix blocks to improve name u-values
-        linker.training.estimate_parameters_using_expectation_maximisation(
-            block_on("substr(name_clean, 1, 3)")
-        )
-    except Exception:
-        pass # Fall back to u-only estimates
+        try:
+            # First pass — train on postcode sector blocks
+            linker.training.estimate_parameters_using_expectation_maximisation(
+                block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
+            )
+            # Second pass — train on name prefix blocks to improve name u-values
+            linker.training.estimate_parameters_using_expectation_maximisation(
+                block_on("substr(name_clean, 1, 3)")
+            )
+        except Exception:
+            pass  # Fall back to u-only estimates
 
 
     print("  Generating predictions...")
@@ -305,6 +305,8 @@ def probabilistic_match(df_a, df_b):
 def format_predictions(df_pred, df_a, df_b):
     if df_pred.empty:
         return pd.DataFrame(), pd.DataFrame()
+
+    from rapidfuzz.distance import JaroWinkler
 
     a_lookup = df_a.set_index("unique_id")
     b_lookup = df_b.set_index("unique_id")
@@ -325,7 +327,6 @@ def format_predictions(df_pred, df_a, df_b):
             name_a_clean = rec_a.get("name_clean")
             name_b_clean = rec_b.get("name_clean")
             if name_a_clean and name_b_clean:
-                from rapidfuzz.distance import JaroWinkler
                 name_sim = JaroWinkler.similarity(name_a_clean, name_b_clean)
                 if name_sim < MIN_NAME_SIMILARITY:
                     band = "Review"
