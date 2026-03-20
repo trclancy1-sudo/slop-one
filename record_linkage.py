@@ -444,5 +444,49 @@ def main():
     return exact_matches, auto_matches, review_matches
 
 
+def main_powerbi():
+    """
+    Entry point for Power BI / Power Query.
+    Returns a single combined DataFrame that Power Query can pick up.
+    Errors are returned as a DataFrame so they appear in the preview
+    instead of the cryptic "section1/query1 does not exist" message.
+    """
+    try:
+        exact_matches, auto_matches, review_matches = main()
+
+        # Tag each result set and combine into one table for Power Query
+        parts = []
+        if not exact_matches.empty:
+            em = exact_matches.copy()
+            em["match_type"] = "Exact KEY"
+            em["match_band"] = "Exact KEY"
+            parts.append(em)
+        if not auto_matches.empty:
+            am = auto_matches.copy()
+            am["match_type"] = "Probabilistic"
+            parts.append(am)
+        if not review_matches.empty:
+            rm = review_matches.copy()
+            rm["match_type"] = "Probabilistic"
+            parts.append(rm)
+
+        if parts:
+            return pd.concat(parts, ignore_index=True)
+        else:
+            return pd.DataFrame({"Info": ["No matches found."]})
+
+    except Exception as e:
+        return pd.DataFrame({"Error": [str(e)]})
+
+
+# ---------------------------------------------------------------------------
+# When run from the command line, use main() as before.
+# When run inside Power BI, call main_powerbi() to get a single DataFrame.
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     main()
+else:
+    # Power BI executes the script but __name__ != "__main__".
+    # Expose the result as a top-level DataFrame so Power Query can find it.
+    dataset = main_powerbi()
