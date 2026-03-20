@@ -320,6 +320,12 @@ def format_predictions(df_pred, df_a, df_b):
         rec_a = a_lookup.loc[uid_a] if uid_a in a_lookup.index else pd.Series()
         rec_b = b_lookup.loc[uid_b] if uid_b in b_lookup.index else pd.Series()
 
+        # Require exact postcode match — discard pairs with only similar postcodes
+        pc_a = rec_a.get("postcode_clean")
+        pc_b = rec_b.get("postcode_clean")
+        if pc_a and pc_b and pc_a != pc_b:
+            continue
+
         # Name similarity guard — discard pairs where names are too dissimilar
         # regardless of Splink score (prevents postcode-only matches)
         name_a_clean = rec_a.get("name_clean")
