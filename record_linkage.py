@@ -441,6 +441,8 @@ def main():
     print(f"  Flagged for manual review:    {len(review_matches):>8,}")
     print("=" * 60)
 
+    return exact_matches, auto_matches, review_matches
+
 
 if __name__ == "__main__":
     main()
