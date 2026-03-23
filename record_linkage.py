@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Record Linkage Script
 =====================
@@ -20,7 +21,7 @@ POWER BI USAGE
    Power BI runs scripts from a temp folder, so relative paths will NOT work.
 4. Make sure Power BI's Python path (File > Options > Python scripting) points
    to the environment where you installed the packages above.
-5. Click OK — the script produces a table called 'dataset' that Power BI
+5. Click OK -- the script produces a table called 'dataset' that Power BI
    will show in the Navigator. Click Load.
 """
 
@@ -30,7 +31,7 @@ import sys
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# Dependency check — surfaces clear errors in Power BI instead of crashing
+# Dependency check -- surfaces clear errors in Power BI instead of crashing
 # ---------------------------------------------------------------------------
 _missing = []
 for _pkg in ["splink", "openpyxl", "rapidfuzz", "duckdb"]:
@@ -47,14 +48,14 @@ if _missing:
             f"Install them with:  pip install {' '.join(_missing)}"
         ]
     })
-    # Stop execution here — the rest of the script would fail anyway
+    # Stop execution here -- the rest of the script would fail anyway
     raise SystemExit(0) if __name__ == "__main__" else None
 else:
     from splink import DuckDBAPI, Linker, SettingsCreator, block_on
     import splink.comparison_library as cl
 
 # =============================================================================
-# CONFIG — Edit this section to match your files
+# CONFIG -- Edit this section to match your files
 # =============================================================================
 
 # --- File paths --------------------------------------------------------------
@@ -100,7 +101,7 @@ MIN_NAME_SIMILARITY = 0.80
 OUTPUT_FILE = "matched_clients.xlsx"
 
 # =============================================================================
-# STEP 1 — Load & combine files
+# STEP 1 -- Load & combine files
 # =============================================================================
 
 def load_group(files, col_map, group_label):
@@ -144,7 +145,7 @@ def load_group(files, col_map, group_label):
 
 
 # =============================================================================
-# STEP 2 — Standardise / clean
+# STEP 2 -- Standardise / clean
 # =============================================================================
 
 def clean_name(s):
@@ -185,8 +186,8 @@ def clean_name(s):
 
 def name_token_sort(s):
     """
-    Token-sorted name for blocking: 'SMITH JOHN' and 'JOHN SMITH' → 'JOHN SMITH'.
-    Used as a blocking key only — fuzzy scoring uses the unsorted clean name.
+    Token-sorted name for blocking: 'SMITH JOHN' and 'JOHN SMITH' -> 'JOHN SMITH'.
+    Used as a blocking key only -- fuzzy scoring uses the unsorted clean name.
     """
     if pd.isna(s):
         return None
@@ -201,7 +202,7 @@ def clean_postcode(s):
 
 
 def postcode_sector(pc):
-    """Extract sector: 'SW1A1AA' → 'SW1A1'  (everything except last 2 chars)"""
+    """Extract sector: 'SW1A1AA' -> 'SW1A1'  (everything except last 2 chars)"""
     if pd.isna(pc) or len(pc) < 3:
         return None
     return pc[:-2]
@@ -212,7 +213,7 @@ def clean_numeric_key(s):
     if pd.isna(s):
         return None
     s = str(s).strip()
-    # Remove float suffix: "12345.0" → "12345"
+    # Remove float suffix: "12345.0" -> "12345"
     if re.match(r"^\d+\.0$", s):
         s = s[:-2]
     return s or None
@@ -231,7 +232,7 @@ def standardise(df):
 
 
 # =============================================================================
-# STEP 3 — Exact KEY matching
+# STEP 3 -- Exact KEY matching
 # =============================================================================
 
 def exact_key_match(df_a, df_b):
@@ -256,7 +257,7 @@ def exact_key_match(df_a, df_b):
 
 
 # =============================================================================
-# STEP 4 — Probabilistic matching with Splink
+# STEP 4 -- Probabilistic matching with Splink
 # =============================================================================
 
 def probabilistic_match(df_a, df_b):
@@ -289,7 +290,7 @@ def probabilistic_match(df_a, df_b):
         )
 
     if not comparisons:
-        print("  No usable columns for probabilistic matching — skipping.")
+        print("  No usable columns for probabilistic matching -- skipping.")
         return pd.DataFrame()
 
     # Blocking rules: only compare records within same postcode sector or same name prefix
@@ -306,7 +307,7 @@ def probabilistic_match(df_a, df_b):
         em_convergence=0.001,
     )
 
-    # Only pass Splink the columns it needs — extra columns cause DuckDB binder errors
+    # Only pass Splink the columns it needs -- extra columns cause DuckDB binder errors
     splink_cols = ["unique_id"]
     for col in ["name_clean", "name_sorted", "postcode_clean", "postcode_sector"]:
         if col in df_a.columns:
@@ -339,11 +340,11 @@ def probabilistic_match(df_a, df_b):
 
     if has_name:
         try:
-            # First pass — train on postcode sector blocks
+            # First pass -- train on postcode sector blocks
             linker.training.estimate_parameters_using_expectation_maximisation(
                 block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
             )
-            # Second pass — train on name prefix blocks to improve name u-values
+            # Second pass -- train on name prefix blocks to improve name u-values
             linker.training.estimate_parameters_using_expectation_maximisation(
                 block_on("substr(name_clean, 1, 3)")
             )
@@ -359,7 +360,7 @@ def probabilistic_match(df_a, df_b):
 
 
 # =============================================================================
-# STEP 5 — Format output
+# STEP 5 -- Format output
 # =============================================================================
 
 def format_predictions(df_pred, df_a, df_b):
@@ -380,13 +381,13 @@ def format_predictions(df_pred, df_a, df_b):
         rec_a = a_lookup.loc[uid_a] if uid_a in a_lookup.index else pd.Series()
         rec_b = b_lookup.loc[uid_b] if uid_b in b_lookup.index else pd.Series()
 
-        # Require exact postcode match — discard pairs with only similar postcodes
+        # Require exact postcode match -- discard pairs with only similar postcodes
         pc_a = rec_a.get("postcode_clean")
         pc_b = rec_b.get("postcode_clean")
         if pc_a and pc_b and pc_a != pc_b:
             continue
 
-        # Name similarity guard — discard pairs where names are too dissimilar
+        # Name similarity guard -- discard pairs where names are too dissimilar
         # regardless of Splink score (prevents postcode-only matches)
         name_a_clean = rec_a.get("name_clean")
         name_b_clean = rec_b.get("name_clean")
@@ -419,7 +420,7 @@ def format_predictions(df_pred, df_a, df_b):
 
 
 # =============================================================================
-# STEP 6 — Write Excel output
+# STEP 6 -- Write Excel output
 # =============================================================================
 
 def write_output(exact_matches, auto_matches, review_matches):
@@ -446,13 +447,13 @@ def write_output(exact_matches, auto_matches, review_matches):
                             len(review_matches),
                             len(exact_matches) + len(auto_matches) + len(review_matches)],
             "Threshold":   [f"KEY match",
-                            f"Score ≥ {THRESHOLD_HIGH}",
-                            f"Score {THRESHOLD_LOW}–{THRESHOLD_HIGH}",
+                            f"Score >= {THRESHOLD_HIGH}",
+                            f"Score {THRESHOLD_LOW}-{THRESHOLD_HIGH}",
                             ""]
         })
         summary.to_excel(writer, sheet_name="Summary", index=False)
 
-    print(f"\n✅  Output written to: {OUTPUT_FILE}")
+    print(f"\nOK:  Output written to: {OUTPUT_FILE}")
 
 
 # =============================================================================
