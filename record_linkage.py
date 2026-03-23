@@ -7,29 +7,67 @@ Matches clients across two groups of Excel files using:
 
 SETUP
 -----
-1. pip install splink pandas openpyxl rapidfuzz
+1. pip install splink pandas openpyxl rapidfuzz duckdb
 2. Edit the CONFIG section below to match your file paths and column names.
 3. Run: python record_linkage.py
+
+POWER BI USAGE
+--------------
+1. In Power BI Desktop: Home > Get Data > Other > Python script
+2. Paste this entire script into the editor
+3. IMPORTANT: Change all file paths below to ABSOLUTE paths, e.g.:
+       r"C:\Users\YourName\Documents\GBS Client.xlsx"
+   Power BI runs scripts from a temp folder, so relative paths will NOT work.
+4. Make sure Power BI's Python path (File > Options > Python scripting) points
+   to the environment where you installed the packages above.
+5. Click OK — the script produces a table called 'dataset' that Power BI
+   will show in the Navigator. Click Load.
 """
 
+import os
 import re
+import sys
 import pandas as pd
-from splink import DuckDBAPI, Linker, SettingsCreator, block_on
-import splink.comparison_library as cl
+
+# ---------------------------------------------------------------------------
+# Dependency check — surfaces clear errors in Power BI instead of crashing
+# ---------------------------------------------------------------------------
+_missing = []
+for _pkg in ["splink", "openpyxl", "rapidfuzz", "duckdb"]:
+    try:
+        __import__(_pkg)
+    except ImportError:
+        _missing.append(_pkg)
+
+if _missing:
+    # In Power BI this becomes a visible table instead of a silent failure
+    dataset = pd.DataFrame({
+        "Error": [
+            f"Missing Python packages: {', '.join(_missing)}. "
+            f"Install them with:  pip install {' '.join(_missing)}"
+        ]
+    })
+    # Stop execution here — the rest of the script would fail anyway
+    raise SystemExit(0) if __name__ == "__main__" else None
+else:
+    from splink import DuckDBAPI, Linker, SettingsCreator, block_on
+    import splink.comparison_library as cl
 
 # =============================================================================
 # CONFIG — Edit this section to match your files
 # =============================================================================
 
 # --- File paths --------------------------------------------------------------
+# POWER BI USERS: You MUST use full absolute paths here, e.g.:
+#   r"C:\Users\YourName\Documents\GBS Client.xlsx"
 GROUP_A_FILES = [
     r"GBS Client.xlsx",   # First file for Group A
-    r"GBS WIN.xlsx",   # Second file for Group A
+    r"GBS WIN.xlsx",      # Second file for Group A
 ]
 
 GROUP_B_FILES = [
     r"GGB Client.xlsx",   # First file for Group B
-    r"GGB WIN.xlsx",   # Second file for Group B
+    r"GGB WIN.xlsx",      # Second file for Group B
 ]
 
 # --- Column name mapping (set to None if column doesn't exist) ---------------
@@ -68,6 +106,12 @@ OUTPUT_FILE = "matched_clients.xlsx"
 def load_group(files, col_map, group_label):
     frames = []
     for path in files:
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"Cannot find file: {path}\n"
+                f"Current working directory: {os.getcwd()}\n"
+                f"Hint: Use absolute paths (e.g. r\"C:\\Users\\You\\Documents\\{os.path.basename(path)}\")"
+            )
         # Read everything as str to prevent numeric key columns loading as float
         df = pd.read_excel(path, dtype=str)
         df.columns = df.columns.str.strip()
@@ -270,8 +314,25 @@ def probabilistic_match(df_a, df_b):
     df_a_splink = df_a[splink_cols].copy()
     df_b_splink = df_b[splink_cols].copy()
 
-    db_api = DuckDBAPI()
-    linker = Linker([df_a_splink, df_b_splink], settings, db_api=db_api)
+    # DuckDB can fail in Power BI's sandboxed environment. Try an in-memory
+    # database first; if that fails, fall back to a temp file-based database.
+    try:
+        db_api = DuckDBAPI()
+    except Exception:
+        import tempfile
+        _tmp_db = os.path.join(tempfile.gettempdir(), "splink_linkage.duckdb")
+        print(f"  In-memory DuckDB failed; using temp file: {_tmp_db}")
+        try:
+            db_api = DuckDBAPI(connection=_tmp_db)
+        except Exception as exc:
+            print(f"  DuckDB init failed: {exc}")
+            return pd.DataFrame()
+
+    try:
+        linker = Linker([df_a_splink, df_b_splink], settings, db_api=db_api)
+    except Exception as exc:
+        print(f"  Splink Linker init failed: {exc}")
+        return pd.DataFrame()
 
     print("  Training Splink model...")
     linker.training.estimate_u_using_random_sampling(max_pairs=1_000_000)
@@ -288,7 +349,6 @@ def probabilistic_match(df_a, df_b):
             )
         except Exception:
             pass  # Fall back to u-only estimates
-
 
     print("  Generating predictions...")
     predictions = linker.inference.predict(threshold_match_probability=THRESHOLD_LOW)
@@ -452,6 +512,21 @@ def main_powerbi():
     instead of the cryptic "section1/query1 does not exist" message.
     """
     try:
+        # Validate files exist before doing any work
+        all_files = GROUP_A_FILES + GROUP_B_FILES
+        missing = [f for f in all_files if not os.path.isfile(f)]
+        if missing:
+            return pd.DataFrame({
+                "Error": [f"File not found: {f}"] for f in missing
+            } if len(missing) == 1 else {
+                "Error": [
+                    f"Files not found ({len(missing)} missing). "
+                    f"Working directory: {os.getcwd()}. "
+                    f"Missing: {', '.join(missing)}. "
+                    f"Hint: Use absolute paths like r\"C:\\Users\\You\\Documents\\filename.xlsx\""
+                ]
+            })
+
         exact_matches, auto_matches, review_matches = main()
 
         # Tag each result set and combine into one table for Power Query
@@ -475,8 +550,19 @@ def main_powerbi():
         else:
             return pd.DataFrame({"Info": ["No matches found."]})
 
-    except Exception as e:
+    except FileNotFoundError as e:
         return pd.DataFrame({"Error": [str(e)]})
+    except Exception as e:
+        import traceback
+        return pd.DataFrame({
+            "Error": [str(e)],
+            "Details": [traceback.format_exc()],
+            "Hint": [
+                "Common fixes: (1) Use absolute file paths, "
+                "(2) Install packages: pip install splink pandas openpyxl rapidfuzz duckdb, "
+                "(3) Check Python path in Power BI Options > Python scripting"
+            ],
+        })
 
 
 # ---------------------------------------------------------------------------
