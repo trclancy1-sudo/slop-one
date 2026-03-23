@@ -17,7 +17,7 @@ POWER BI USAGE
 1. In Power BI Desktop: Home > Get Data > Other > Python script
 2. Paste this entire script into the editor
 3. IMPORTANT: Change all file paths below to ABSOLUTE paths, e.g.:
-       r"C:\Users\YourName\Documents\GBS Client.xlsx"
+       r"C:\\Users\\YourName\\Documents\\GBS Client.xlsx"
    Power BI runs scripts from a temp folder, so relative paths will NOT work.
 4. Make sure Power BI's Python path (File > Options > Python scripting) points
    to the environment where you installed the packages above.
