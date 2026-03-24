@@ -82,18 +82,28 @@ else:
     # Helpers
     # =================================================================
 
+    # Grab references to Power BI query DataFrames at top level, where
+    # Power BI injects them.  locals()/globals() inside a function won't
+    # see them, so we capture them here in a dict first.
+    _pbi_frames = {}
+    for _qn in GROUP_A_QUERY_NAMES + GROUP_B_QUERY_NAMES:
+        _df = globals().get(_qn) or locals().get(_qn)
+        if _df is None:
+            dataset = pd.DataFrame({
+                "Error": [
+                    f"Query '{_qn}' not found. "
+                    f"Make sure you selected it before running the Python script step. "
+                    f"Available variables: {[k for k in dir() if not k.startswith('_') and isinstance(eval(k), pd.DataFrame)]}"
+                ]
+            })
+            raise SystemExit(0)
+        _pbi_frames[_qn] = _df
+
     def _collect_queries(query_names, col_map, group_label):
         """Combine DataFrames from Power BI queries into one group."""
         frames = []
         for qname in query_names:
-            # Power BI makes each query available as a local variable
-            df = locals().get(qname) or globals().get(qname)
-            if df is None:
-                raise ValueError(
-                    f"Query '{qname}' not found. Make sure you selected it "
-                    f"before running this Python script step. Available "
-                    f"globals: {[k for k in globals() if not k.startswith('_')]}"
-                )
+            df = _pbi_frames[qname]
             df = df.copy()
             df.columns = df.columns.str.strip()
             # Cast everything to str to avoid float keys
