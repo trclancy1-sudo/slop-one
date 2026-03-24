@@ -35,7 +35,7 @@ _quiet = False
 
 def _log(msg=""):
     if not _quiet:
-        _log(msg)
+        print(msg)
 
 # ---------------------------------------------------------------------------
 # Dependency check -- surfaces clear errors in Power BI instead of crashing
