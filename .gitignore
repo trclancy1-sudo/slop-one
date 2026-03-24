@@ -1,6 +1,1 @@
-node_modules/
-dist/
-!dist/*.pbiviz
-.tmp/
-*.statistics.*.html
-.DS_Store
+__pycache__/
