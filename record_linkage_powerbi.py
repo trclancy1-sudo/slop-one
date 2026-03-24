@@ -30,100 +30,92 @@ import re
 import tempfile
 import pandas as pd
 
-# ---------------------------------------------------------------------------
-# Dependency check
-# ---------------------------------------------------------------------------
-_missing = []
-for _pkg in ["splink", "rapidfuzz", "duckdb"]:
-    try:
-        __import__(_pkg)
-    except ImportError:
-        _missing.append(_pkg)
+# =============================================================================
+# CONFIG -- edit this section
+# =============================================================================
 
-if _missing:
-    dataset = pd.DataFrame({
-        "Error": [
-            f"Missing Python packages: {', '.join(_missing)}. "
-            f"Install them with:  pip install {' '.join(_missing)}"
-        ]
-    })
-else:
+GROUP_A_QUERY_NAMES = ["GBS_Client", "GBS_WIN"]
+GROUP_B_QUERY_NAMES = ["GGB_Client", "GGB_WIN"]
+
+GROUP_A_COLUMNS = {
+    "key":      "DUNS",
+    "name":     "Client_Name",
+    "postcode": "Postal_Code",
+}
+GROUP_B_COLUMNS = {
+    "key":      "DUNS",
+    "name":     "Client_Name",
+    "postcode": "Postal_Code",
+}
+
+THRESHOLD_HIGH      = 0.95
+THRESHOLD_LOW       = 0.40
+MIN_NAME_SIMILARITY = 0.80
+
+
+# =============================================================================
+# ALL LOGIC IN ONE FUNCTION -- so 'dataset' can be assigned at top level
+# =============================================================================
+
+def _run(pbi_vars):
+    """
+    Main entry point.  pbi_vars should be globals() from the top-level
+    scope so we can find Power BI's injected DataFrames.
+    Returns a single DataFrame.
+    """
+
+    # --- Dependency check ---------------------------------------------------
+    missing = []
+    for pkg in ["splink", "rapidfuzz", "duckdb"]:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        return pd.DataFrame({
+            "Error": [
+                f"Missing Python packages: {', '.join(missing)}. "
+                f"Install them with:  pip install {' '.join(missing)}"
+            ]
+        })
+
     from splink import DuckDBAPI, Linker, SettingsCreator, block_on
     import splink.comparison_library as cl
     from rapidfuzz.distance import JaroWinkler
 
-    # =================================================================
-    # CONFIG -- edit this section
-    # =================================================================
-
-    # Query names -- must match your Power BI query names exactly.
-    # Power BI exposes each selected query as a DataFrame variable.
-    GROUP_A_QUERY_NAMES = ["GBS_Client", "GBS_WIN"]
-    GROUP_B_QUERY_NAMES = ["GGB_Client", "GGB_WIN"]
-
-    # Column mapping  (set to None if the column doesn't exist)
-    GROUP_A_COLUMNS = {
-        "key":      "DUNS",
-        "name":     "Client_Name",
-        "postcode": "Postal_Code",
-    }
-    GROUP_B_COLUMNS = {
-        "key":      "DUNS",
-        "name":     "Client_Name",
-        "postcode": "Postal_Code",
-    }
-
-    # Thresholds
-    THRESHOLD_HIGH      = 0.95
-    THRESHOLD_LOW       = 0.40
-    MIN_NAME_SIMILARITY = 0.80
-
-    # =================================================================
-    # Helpers
-    # =================================================================
-
-    # Grab references to Power BI query DataFrames at top level, where
-    # Power BI injects them.  locals()/globals() inside a function won't
-    # see them, so we capture them here in a dict first.
-    _pbi_frames = {}
-    for _qn in GROUP_A_QUERY_NAMES + GROUP_B_QUERY_NAMES:
-        _df = globals().get(_qn) or locals().get(_qn)
-        if _df is None:
-            dataset = pd.DataFrame({
+    # --- Grab Power BI query DataFrames ------------------------------------
+    pbi_frames = {}
+    for qn in GROUP_A_QUERY_NAMES + GROUP_B_QUERY_NAMES:
+        df = pbi_vars.get(qn)
+        if df is None or not isinstance(df, pd.DataFrame):
+            return pd.DataFrame({
                 "Error": [
-                    f"Query '{_qn}' not found. "
-                    f"Make sure you selected it before running the Python script step. "
-                    f"Available variables: {[k for k in dir() if not k.startswith('_') and isinstance(eval(k), pd.DataFrame)]}"
+                    f"Query '{qn}' not found. "
+                    "Make sure you selected it before running the Python script step."
                 ]
             })
-            raise SystemExit(0)
-        _pbi_frames[_qn] = _df
+        pbi_frames[qn] = df
 
-    def _collect_queries(query_names, col_map, group_label):
-        """Combine DataFrames from Power BI queries into one group."""
+    # --- Helpers -----------------------------------------------------------
+    def collect_queries(query_names, col_map, group_label):
         frames = []
         for qname in query_names:
-            df = _pbi_frames[qname]
-            df = df.copy()
+            df = pbi_frames[qname].copy()
             df.columns = df.columns.str.strip()
-            # Cast everything to str to avoid float keys
             for c in df.columns:
                 df[c] = df[c].astype(str).replace("nan", pd.NA)
-
             rename = {}
             for std_name, actual_name in col_map.items():
                 if actual_name and actual_name in df.columns:
                     rename[actual_name] = std_name
             df = df.rename(columns=rename)
-
             df["_source_query"] = qname
             frames.append(df)
-
         combined = pd.concat(frames, ignore_index=True)
         combined["_group"] = group_label
         return combined
 
-    def _clean_name(s):
+    def clean_name(s):
         if pd.isna(s):
             return None
         s = str(s).upper().strip()
@@ -141,23 +133,23 @@ else:
         s = re.sub(r"\s+", " ", s).strip()
         return s or None
 
-    def _name_token_sort(s):
+    def name_token_sort(s):
         if pd.isna(s):
             return None
         return " ".join(sorted(s.split()))
 
-    def _clean_postcode(s):
+    def clean_postcode(s):
         if pd.isna(s):
             return None
         s = re.sub(r"\s+", "", str(s).upper().strip())
         return s or None
 
-    def _postcode_sector(pc):
+    def postcode_sector(pc):
         if pd.isna(pc) or len(pc) < 3:
             return None
         return pc[:-2]
 
-    def _clean_numeric_key(s):
+    def clean_numeric_key(s):
         if pd.isna(s):
             return None
         s = str(s).strip()
@@ -165,18 +157,18 @@ else:
             s = s[:-2]
         return s or None
 
-    def _standardise(df):
+    def standardise(df):
         if "name" in df.columns:
-            df["name_clean"] = df["name"].apply(_clean_name)
-            df["name_sorted"] = df["name_clean"].apply(_name_token_sort)
+            df["name_clean"] = df["name"].apply(clean_name)
+            df["name_sorted"] = df["name_clean"].apply(name_token_sort)
         if "postcode" in df.columns:
-            df["postcode_clean"] = df["postcode"].apply(_clean_postcode)
-            df["postcode_sector"] = df["postcode_clean"].apply(_postcode_sector)
+            df["postcode_clean"] = df["postcode"].apply(clean_postcode)
+            df["postcode_sector"] = df["postcode_clean"].apply(postcode_sector)
         if "key" in df.columns:
-            df["key_clean"] = df["key"].apply(_clean_numeric_key)
+            df["key_clean"] = df["key"].apply(clean_numeric_key)
         return df
 
-    def _exact_key_match(df_a, df_b):
+    def exact_key_match(df_a, df_b):
         if "key_clean" not in df_a.columns or "key_clean" not in df_b.columns:
             return pd.DataFrame(), df_a, df_b
         a_keyed = df_a[df_a["key_clean"].notna()].copy()
@@ -188,7 +180,7 @@ else:
         remaining_b = df_b[~df_b["_id"].isin(matched["_id_B"].unique())].copy()
         return matched, remaining_a, remaining_b
 
-    def _probabilistic_match(df_a, df_b):
+    def probabilistic_match(df_a, df_b):
         if df_a.empty or df_b.empty:
             return pd.DataFrame()
 
@@ -232,9 +224,9 @@ else:
         try:
             db_api = DuckDBAPI()
         except Exception:
-            _tmp = os.path.join(tempfile.gettempdir(), "splink_linkage.duckdb")
+            tmp = os.path.join(tempfile.gettempdir(), "splink_linkage.duckdb")
             try:
-                db_api = DuckDBAPI(connection=_tmp)
+                db_api = DuckDBAPI(connection=tmp)
             except Exception:
                 return pd.DataFrame()
 
@@ -262,7 +254,7 @@ else:
         predictions = linker.inference.predict(threshold_match_probability=THRESHOLD_LOW)
         return predictions.as_pandas_dataframe()
 
-    def _format_predictions(df_pred, df_a, df_b):
+    def format_predictions(df_pred, df_a, df_b):
         if df_pred.empty:
             return pd.DataFrame(), pd.DataFrame()
 
@@ -311,48 +303,51 @@ else:
         review = df_out[df_out["match_band"] == "Review"]
         return auto, review
 
-    # =================================================================
-    # Run
-    # =================================================================
-    try:
-        df_a = _collect_queries(GROUP_A_QUERY_NAMES, GROUP_A_COLUMNS, "A")
-        df_b = _collect_queries(GROUP_B_QUERY_NAMES, GROUP_B_COLUMNS, "B")
+    # --- Run ---------------------------------------------------------------
+    df_a = collect_queries(GROUP_A_QUERY_NAMES, GROUP_A_COLUMNS, "A")
+    df_b = collect_queries(GROUP_B_QUERY_NAMES, GROUP_B_COLUMNS, "B")
 
-        df_a = _standardise(df_a).reset_index(drop=True)
-        df_b = _standardise(df_b).reset_index(drop=True)
-        df_a["_id"] = df_a.index
-        df_b["_id"] = df_b.index
-        df_a["unique_id"] = "A_" + df_a["_id"].astype(str)
-        df_b["unique_id"] = "B_" + df_b["_id"].astype(str)
+    df_a = standardise(df_a).reset_index(drop=True)
+    df_b = standardise(df_b).reset_index(drop=True)
+    df_a["_id"] = df_a.index
+    df_b["_id"] = df_b.index
+    df_a["unique_id"] = "A_" + df_a["_id"].astype(str)
+    df_b["unique_id"] = "B_" + df_b["_id"].astype(str)
 
-        exact_matches, remaining_a, remaining_b = _exact_key_match(df_a, df_b)
+    exact_matches, remaining_a, remaining_b = exact_key_match(df_a, df_b)
 
-        df_pred = _probabilistic_match(remaining_a, remaining_b)
-        auto_matches, review_matches = _format_predictions(df_pred, remaining_a, remaining_b)
+    df_pred = probabilistic_match(remaining_a, remaining_b)
+    auto_matches, review_matches = format_predictions(df_pred, remaining_a, remaining_b)
 
-        parts = []
-        if not exact_matches.empty:
-            em = exact_matches.copy()
-            em["match_type"] = "Exact KEY"
-            em["match_band"] = "Exact KEY"
-            parts.append(em)
-        if not auto_matches.empty:
-            am = auto_matches.copy()
-            am["match_type"] = "Probabilistic"
-            parts.append(am)
-        if not review_matches.empty:
-            rm = review_matches.copy()
-            rm["match_type"] = "Probabilistic"
-            parts.append(rm)
+    parts = []
+    if not exact_matches.empty:
+        em = exact_matches.copy()
+        em["match_type"] = "Exact KEY"
+        em["match_band"] = "Exact KEY"
+        parts.append(em)
+    if not auto_matches.empty:
+        am = auto_matches.copy()
+        am["match_type"] = "Probabilistic"
+        parts.append(am)
+    if not review_matches.empty:
+        rm = review_matches.copy()
+        rm["match_type"] = "Probabilistic"
+        parts.append(rm)
 
-        if parts:
-            dataset = pd.concat(parts, ignore_index=True)
-        else:
-            dataset = pd.DataFrame({"Info": ["No matches found."]})
+    if parts:
+        return pd.concat(parts, ignore_index=True)
+    else:
+        return pd.DataFrame({"Info": ["No matches found."]})
 
-    except Exception as _e:
-        import traceback
-        dataset = pd.DataFrame({
-            "Error": [str(_e)],
-            "Details": [traceback.format_exc()],
-        })
+
+# =============================================================================
+# TOP-LEVEL: 'dataset' assigned here so Power BI can always find it
+# =============================================================================
+try:
+    dataset = _run(globals())
+except Exception as _e:
+    import traceback
+    dataset = pd.DataFrame({
+        "Error": [str(_e)],
+        "Details": [traceback.format_exc()],
+    })
