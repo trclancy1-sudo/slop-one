@@ -229,9 +229,14 @@ def _run(input_df):
             comparisons.append(cl.ExactMatch("postcode_sector"))
 
         if comparisons:
-            if has_pc:
+            # With 300k rows, tight blocking is essential to keep pairs manageable.
+            # Only compare records that share postcode sector AND first 3 chars of name.
+            if has_pc and has_name:
+                blocking_rules.append(block_on("postcode_sector", "substr(name_clean, 1, 3)"))
+                blocking_rules.append(block_on("postcode_sector", "name_sorted"))
+            elif has_pc:
                 blocking_rules.append(block_on("postcode_sector"))
-            if has_name:
+            elif has_name:
                 blocking_rules.append(block_on("substr(name_clean, 1, 4)"))
                 blocking_rules.append(block_on("name_sorted"))
 
@@ -239,7 +244,8 @@ def _run(input_df):
                 link_type="link_only",
                 comparisons=comparisons,
                 blocking_rules_to_generate_predictions=blocking_rules,
-                em_convergence=0.001,
+                em_convergence=0.01,     # relaxed from 0.001 — faster convergence
+                max_iterations=10,        # cap EM iterations
             )
 
             splink_cols = ["unique_id"]
@@ -253,25 +259,40 @@ def _run(input_df):
                 tmp = os.path.join(tempfile.gettempdir(), "splink_linkage.duckdb")
                 db_api = DuckDBAPI(connection=tmp)
 
-            linker = Linker(
-                [ra[splink_cols].copy(), rb[splink_cols].copy()],
+            # For large datasets, train on a sample for speed then predict on all.
+            MAX_TRAIN_ROWS = 30_000
+            if len(ra) > MAX_TRAIN_ROWS or len(rb) > MAX_TRAIN_ROWS:
+                ra_sample = ra.sample(n=min(MAX_TRAIN_ROWS, len(ra)), random_state=42)
+                rb_sample = rb.sample(n=min(MAX_TRAIN_ROWS, len(rb)), random_state=42)
+            else:
+                ra_sample, rb_sample = ra, rb
+
+            # Train model on sample
+            linker_train = Linker(
+                [ra_sample[splink_cols].copy(), rb_sample[splink_cols].copy()],
                 settings, db_api=db_api,
             )
-
-            linker.training.estimate_u_using_random_sampling(max_pairs=200_000)
+            linker_train.training.estimate_u_using_random_sampling(max_pairs=50_000)
 
             if has_name:
                 try:
-                    linker.training.estimate_parameters_using_expectation_maximisation(
+                    linker_train.training.estimate_parameters_using_expectation_maximisation(
                         block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
                     )
-                    linker.training.estimate_parameters_using_expectation_maximisation(
+                    linker_train.training.estimate_parameters_using_expectation_maximisation(
                         block_on("substr(name_clean, 1, 3)")
                     )
                 except Exception:
                     pass
 
-            predictions = linker.inference.predict(threshold_match_probability=THRESHOLD_LOW)
+            # Predict on the full dataset using the trained settings
+            trained_settings = linker_train._settings_obj.as_dict()
+            linker_full = Linker(
+                [ra[splink_cols].copy(), rb[splink_cols].copy()],
+                trained_settings, db_api=db_api,
+            )
+
+            predictions = linker_full.inference.predict(threshold_match_probability=THRESHOLD_LOW)
             df_pred = predictions.as_pandas_dataframe()
 
     # --- Format predictions ------------------------------------------------
