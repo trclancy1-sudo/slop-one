@@ -30,6 +30,13 @@ import re
 import sys
 import pandas as pd
 
+# Quiet mode: suppresses print() in Power BI to avoid stdout buffering hangs
+_quiet = False
+
+def _log(msg=""):
+    if not _quiet:
+        _log(msg)
+
 # ---------------------------------------------------------------------------
 # Dependency check -- surfaces clear errors in Power BI instead of crashing
 # ---------------------------------------------------------------------------
@@ -113,28 +120,25 @@ def load_group(files, col_map, group_label):
                 f"Current working directory: {os.getcwd()}\n"
                 f"Hint: Use absolute paths (e.g. r\"C:\\Users\\You\\Documents\\{os.path.basename(path)}\")"
             )
-        # Read everything as str to prevent numeric key columns loading as float
-        df = pd.read_excel(path, dtype=str)
-        df.columns = df.columns.str.strip()
+        # Read once as str to prevent numeric key columns loading as float
+        original = pd.read_excel(path, dtype=str)
+        original.columns = original.columns.str.strip()
 
         rename = {}
         for std_name, actual_name in col_map.items():
-            if actual_name and actual_name in df.columns:
+            if actual_name and actual_name in original.columns:
                 rename[actual_name] = std_name
 
+        df = original.copy()
         df = df.rename(columns=rename)
 
-        # Keep only standard columns that exist
-        keep = [c for c in ["key", "name", "postcode"] if c in df.columns]
-        df = df[keep].copy()
+        # Standard columns that the script uses internally
+        std_cols = [c for c in ["key", "name", "postcode"] if c in df.columns]
 
-        # Retain all original columns for output context
-        original = pd.read_excel(path, dtype=str)
-        original.columns = original.columns.str.strip()
-        df = pd.concat([df, original.drop(
-            columns=[v for v in col_map.values() if v and v in original.columns],
-            errors="ignore"
-        )], axis=1)
+        # Keep standard columns + any extra original columns (for output context)
+        mapped_originals = [v for v in col_map.values() if v and v in original.columns]
+        extra_cols = [c for c in original.columns if c not in mapped_originals]
+        df = df[std_cols + extra_cols].copy()
 
         df["_source_file"] = path
         frames.append(df)
@@ -252,7 +256,7 @@ def exact_key_match(df_a, df_b):
     remaining_a = df_a[~df_a["_id"].isin(matched_ids_a)].copy()
     remaining_b = df_b[~df_b["_id"].isin(matched_ids_b)].copy()
 
-    print(f"  Exact KEY matches:      {len(matched):>8,}")
+    _log(f"  Exact KEY matches:      {len(matched):>8,}")
     return matched, remaining_a, remaining_b
 
 
@@ -290,7 +294,7 @@ def probabilistic_match(df_a, df_b):
         )
 
     if not comparisons:
-        print("  No usable columns for probabilistic matching -- skipping.")
+        _log("  No usable columns for probabilistic matching -- skipping.")
         return pd.DataFrame()
 
     # Blocking rules: only compare records within same postcode sector or same name prefix
@@ -322,21 +326,23 @@ def probabilistic_match(df_a, df_b):
     except Exception:
         import tempfile
         _tmp_db = os.path.join(tempfile.gettempdir(), "splink_linkage.duckdb")
-        print(f"  In-memory DuckDB failed; using temp file: {_tmp_db}")
+        _log(f"  In-memory DuckDB failed; using temp file: {_tmp_db}")
         try:
             db_api = DuckDBAPI(connection=_tmp_db)
         except Exception as exc:
-            print(f"  DuckDB init failed: {exc}")
+            _log(f"  DuckDB init failed: {exc}")
             return pd.DataFrame()
 
     try:
         linker = Linker([df_a_splink, df_b_splink], settings, db_api=db_api)
     except Exception as exc:
-        print(f"  Splink Linker init failed: {exc}")
+        _log(f"  Splink Linker init failed: {exc}")
         return pd.DataFrame()
 
-    print("  Training Splink model...")
-    linker.training.estimate_u_using_random_sampling(max_pairs=1_000_000)
+    _log("  Training Splink model...")
+    # Fewer pairs in Power BI to avoid timeout in the sandboxed environment
+    _max_pairs = 200_000 if _quiet else 1_000_000
+    linker.training.estimate_u_using_random_sampling(max_pairs=_max_pairs)
 
     if has_name:
         try:
@@ -351,11 +357,11 @@ def probabilistic_match(df_a, df_b):
         except Exception:
             pass  # Fall back to u-only estimates
 
-    print("  Generating predictions...")
+    _log("  Generating predictions...")
     predictions = linker.inference.predict(threshold_match_probability=THRESHOLD_LOW)
     df_pred = predictions.as_pandas_dataframe()
 
-    print(f"  Candidate pairs found:  {len(df_pred):>8,}")
+    _log(f"  Candidate pairs found:  {len(df_pred):>8,}")
     return df_pred
 
 
@@ -433,7 +439,7 @@ def write_output(exact_matches, auto_matches, review_matches):
                 )
             else:
                 df.to_excel(writer, sheet_name=name, index=False)
-            print(f"  Sheet '{name}': {len(df):,} rows")
+            _log(f"  Sheet '{name}': {len(df):,} rows")
 
         write_sheet(exact_matches, "Exact KEY Matches",  "exact key matches")
         write_sheet(auto_matches,  "Auto-Accept Matches", "high-confidence matches")
@@ -453,27 +459,27 @@ def write_output(exact_matches, auto_matches, review_matches):
         })
         summary.to_excel(writer, sheet_name="Summary", index=False)
 
-    print(f"\nOK:  Output written to: {OUTPUT_FILE}")
+    _log(f"\nOK:  Output written to: {OUTPUT_FILE}")
 
 
 # =============================================================================
 # MAIN
 # =============================================================================
 
-def main():
-    print("=" * 60)
-    print("Record Linkage Script")
-    print("=" * 60)
+def main(skip_file_output=False):
+    _log("=" * 60)
+    _log("Record Linkage Script")
+    _log("=" * 60)
 
     # Load
-    print("\n[1/5] Loading files...")
+    _log("\n[1/5] Loading files...")
     df_a = load_group(GROUP_A_FILES, GROUP_A_COLUMNS, "A")
     df_b = load_group(GROUP_B_FILES, GROUP_B_COLUMNS, "B")
-    print(f"  Group A records: {len(df_a):,}")
-    print(f"  Group B records: {len(df_b):,}")
+    _log(f"  Group A records: {len(df_a):,}")
+    _log(f"  Group B records: {len(df_b):,}")
 
     # Standardise
-    print("\n[2/5] Standardising data...")
+    _log("\n[2/5] Standardising data...")
     df_a = standardise(df_a).reset_index(drop=True)
     df_b = standardise(df_b).reset_index(drop=True)
     df_a["_id"] = df_a.index
@@ -482,25 +488,28 @@ def main():
     df_b["unique_id"] = "B_" + df_b["_id"].astype(str)
 
     # Exact KEY match
-    print("\n[3/5] Running exact KEY matching...")
+    _log("\n[3/5] Running exact KEY matching...")
     exact_matches, remaining_a, remaining_b = exact_key_match(df_a, df_b)
-    print(f"  Remaining A: {len(remaining_a):,}  |  Remaining B: {len(remaining_b):,}")
+    _log(f"  Remaining A: {len(remaining_a):,}  |  Remaining B: {len(remaining_b):,}")
 
     # Probabilistic match on remainder
-    print("\n[4/5] Running probabilistic matching (Splink)...")
+    _log("\n[4/5] Running probabilistic matching (Splink)...")
     df_pred = probabilistic_match(remaining_a, remaining_b)
     auto_matches, review_matches = format_predictions(df_pred, remaining_a, remaining_b)
-    print(f"  Auto-accept: {len(auto_matches):,}  |  For review: {len(review_matches):,}")
+    _log(f"  Auto-accept: {len(auto_matches):,}  |  For review: {len(review_matches):,}")
 
-    # Write output
-    print("\n[5/5] Writing output...")
-    write_output(exact_matches, auto_matches, review_matches)
+    # Write output (skipped in Power BI -- unnecessary file I/O)
+    if not skip_file_output:
+        _log("\n[5/5] Writing output...")
+        write_output(exact_matches, auto_matches, review_matches)
+    else:
+        _log("\n[5/5] Skipping file output (Power BI mode).")
 
-    print("\nDone.")
-    print(f"  Exact KEY matches:            {len(exact_matches):>8,}")
-    print(f"  Probabilistic auto-accepts:   {len(auto_matches):>8,}")
-    print(f"  Flagged for manual review:    {len(review_matches):>8,}")
-    print("=" * 60)
+    _log("\nDone.")
+    _log(f"  Exact KEY matches:            {len(exact_matches):>8,}")
+    _log(f"  Probabilistic auto-accepts:   {len(auto_matches):>8,}")
+    _log(f"  Flagged for manual review:    {len(review_matches):>8,}")
+    _log("=" * 60)
 
     return exact_matches, auto_matches, review_matches
 
@@ -512,6 +521,8 @@ def main_powerbi():
     Errors are returned as a DataFrame so they appear in the preview
     instead of the cryptic "section1/query1 does not exist" message.
     """
+    global _quiet
+    _quiet = True
     try:
         # Validate files exist before doing any work
         all_files = GROUP_A_FILES + GROUP_B_FILES
@@ -528,7 +539,7 @@ def main_powerbi():
                 ]
             })
 
-        exact_matches, auto_matches, review_matches = main()
+        exact_matches, auto_matches, review_matches = main(skip_file_output=True)
 
         # Tag each result set and combine into one table for Power Query
         parts = []
@@ -571,9 +582,17 @@ def main_powerbi():
 # When run inside Power BI, call main_powerbi() to get a single DataFrame.
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    # Always create 'dataset' so Power BI can find it regardless of how
-    # the script is invoked (__name__ may be "__main__" in Power BI too).
+def _running_in_powerbi():
+    """Detect if we're running inside Power BI's Python sandbox."""
+    # Power BI runs scripts from a temp directory and sets no terminal
+    return not sys.stdout.isatty()
+
+if _running_in_powerbi():
+    # Power BI: quiet mode, no file output, return DataFrame
     dataset = main_powerbi()
+elif __name__ == "__main__":
+    # Command-line: full output (prints + Excel file)
+    main()
 else:
+    # Imported as module: also use Power BI path
     dataset = main_powerbi()
