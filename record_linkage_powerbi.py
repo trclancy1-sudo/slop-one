@@ -11,27 +11,21 @@ SETUP IN POWER BI
 2. Load your Excel files as four separate queries in Power Query:
      GBS_Client, GBS_WIN, GGB_Client, GGB_WIN
 
-3. To each query, add TWO custom columns (Add Column > Custom Column):
-     - "source_group" with value "A" or "B"
-     - "source_query" with the query name (e.g. "GBS_Client")
-
-     Group A queries get source_group = "A"
-     Group B queries get source_group = "B"
-
-4. Append all four queries into ONE query:
+3. Append all four queries into ONE query:
      Home > Append Queries > Append Queries as New
-     Select all four queries.
+   This creates a "Source" column automatically with the query name.
 
-5. Select the new combined query, then:
+4. Select the appended query, then:
      Transform > Run Python script
    Paste this entire script.
 
-6. The combined data arrives as a variable called 'dataset'.
-   The script uses source_group to split it back into A and B.
+5. The combined data arrives as 'dataset'. The script uses the Source
+   column to split it into Group A (GBS) and Group B (GGB).
 
 COLUMN MAPPING
 --------------
-Edit the CONFIG section below to map your column names.
+Edit the CONFIG section below. Group A and Group B can have different
+column names.
 """
 
 import os
@@ -44,15 +38,25 @@ import pandas as pd
 # CONFIG -- edit this section
 # =============================================================================
 
-# Column mapping: map your actual column names to the standard names.
-# The "source_group" and "source_query" columns are the ones you added in step 3.
-COLUMN_MAP = {
-    "key":           "DUNS",          # Shared key column (set None if absent)
-    "name":          "Client_Name",   # Client name column
-    "postcode":      "Postal_Code",   # Postcode column
-    "source_group":  "source_group",  # The custom column you added ("A" or "B")
-    "source_query":  "source_query",  # The custom column with the query name
+# Column mapping PER GROUP.
+# Group A (GBS) and Group B (GGB) may have different column names.
+GROUP_A_COLUMNS = {
+    "key":      "DUNS",
+    "name":     "Client_Name",
+    "postcode": "Postal_Code",
 }
+GROUP_B_COLUMNS = {
+    "key":      "ClientRef",       # was GGBClientKey, renamed in Power Query
+    "name":     "Client_Name",
+    "postcode": "Postal_Code",
+}
+
+# The "Source" column created by Append Queries -- contains the query name.
+SOURCE_COLUMN = "Source"
+
+# Which Source values belong to Group A vs Group B.
+GROUP_A_SOURCES = ["GBS_Client", "GBS_WIN"]
+GROUP_B_SOURCES = ["GGB_Client", "GGB_WIN"]
 
 # Thresholds
 THRESHOLD_HIGH      = 0.95
@@ -99,34 +103,38 @@ def _run(input_df):
     input_df = input_df.copy()
     input_df.columns = input_df.columns.str.strip()
 
-    # Rename columns to standard names
-    rename = {}
-    for std_name, actual_name in COLUMN_MAP.items():
-        if actual_name and actual_name in input_df.columns:
-            rename[actual_name] = std_name
-    input_df = input_df.rename(columns=rename)
-
-    if "source_group" not in input_df.columns:
+    if SOURCE_COLUMN not in input_df.columns:
         return pd.DataFrame({
             "Error": [
-                "Column 'source_group' not found. "
-                "Add a Custom Column to each query with value \"A\" or \"B\" "
-                "before appending. "
+                f"Column '{SOURCE_COLUMN}' not found. "
+                "This column is created automatically by Append Queries. "
                 f"Available columns: {list(input_df.columns)}"
             ]
         })
 
-    # Split into Group A and Group B
-    df_a = input_df[input_df["source_group"].str.upper().str.strip() == "A"].copy()
-    df_b = input_df[input_df["source_group"].str.upper().str.strip() == "B"].copy()
+    # Split into Group A and Group B using the Source column
+    raw_a = input_df[input_df[SOURCE_COLUMN].isin(GROUP_A_SOURCES)].copy()
+    raw_b = input_df[input_df[SOURCE_COLUMN].isin(GROUP_B_SOURCES)].copy()
 
-    if df_a.empty or df_b.empty:
+    if raw_a.empty or raw_b.empty:
         return pd.DataFrame({
             "Error": [
-                f"Group A has {len(df_a)} rows, Group B has {len(df_b)} rows. "
-                "Both groups need data. Check your source_group column values."
+                f"Group A has {len(raw_a)} rows, Group B has {len(raw_b)} rows. "
+                f"Source column values found: {input_df[SOURCE_COLUMN].unique().tolist()}. "
+                f"Expected A: {GROUP_A_SOURCES}, B: {GROUP_B_SOURCES}."
             ]
         })
+
+    # Apply per-group column mapping
+    def apply_col_map(df, col_map):
+        rename = {}
+        for std_name, actual_name in col_map.items():
+            if actual_name and actual_name in df.columns:
+                rename[actual_name] = std_name
+        return df.rename(columns=rename)
+
+    df_a = apply_col_map(raw_a, GROUP_A_COLUMNS)
+    df_b = apply_col_map(raw_b, GROUP_B_COLUMNS)
 
     # --- Helpers -----------------------------------------------------------
     def clean_name(s):
