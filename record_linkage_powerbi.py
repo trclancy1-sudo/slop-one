@@ -46,7 +46,7 @@ GROUP_A_COLUMNS = {
     "postcode": "Postal_Code",
 }
 GROUP_B_COLUMNS = {
-    "key":      "ClientRef",       # was GGBClientKey, renamed in Power Query
+    "key":      "DUNS",            # Shared DUNS key for exact matching
     "name":     "Client_Name",
     "postcode": "Postal_Code",
 }
@@ -229,14 +229,10 @@ def _run(input_df):
             comparisons.append(cl.ExactMatch("postcode_sector"))
 
         if comparisons:
-            # With 300k rows, tight blocking is essential to keep pairs manageable.
-            # Only compare records that share postcode sector AND first 3 chars of name.
-            if has_pc and has_name:
-                blocking_rules.append(block_on("postcode_sector", "substr(name_clean, 1, 3)"))
-                blocking_rules.append(block_on("postcode_sector", "name_sorted"))
-            elif has_pc:
+            # Block on postcode sector OR name prefix (same strategy as standalone).
+            if has_pc:
                 blocking_rules.append(block_on("postcode_sector"))
-            elif has_name:
+            if has_name:
                 blocking_rules.append(block_on("substr(name_clean, 1, 4)"))
                 blocking_rules.append(block_on("name_sorted"))
 
@@ -244,8 +240,7 @@ def _run(input_df):
                 link_type="link_only",
                 comparisons=comparisons,
                 blocking_rules_to_generate_predictions=blocking_rules,
-                em_convergence=0.01,     # relaxed from 0.001 — faster convergence
-                max_iterations=10,        # cap EM iterations
+                em_convergence=0.001,
             )
 
             splink_cols = ["unique_id"]
@@ -272,7 +267,7 @@ def _run(input_df):
                 [ra_sample[splink_cols].copy(), rb_sample[splink_cols].copy()],
                 settings, db_api=db_api,
             )
-            linker_train.training.estimate_u_using_random_sampling(max_pairs=50_000)
+            linker_train.training.estimate_u_using_random_sampling(max_pairs=1_000_000)
 
             if has_name:
                 try:
