@@ -409,6 +409,8 @@ def format_predictions(df_pred, df_a, df_b):
             "match_score":      score,
             "match_band":       band,
             "name_similarity":  round(name_sim, 4),
+            "ClientRef":        rec_a.get("ClientRef"),
+            "GGBClientKey":     rec_b.get("GGBClientKey"),
             "name_A":           rec_a.get("name"),
             "name_B":           rec_b.get("name"),
             "postcode_A":       rec_a.get("postcode"),

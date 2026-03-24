@@ -307,7 +307,11 @@ def _run(input_df):
         df_pred["match_score"] = df_pred["match_probability"].round(4)
 
         a_cols = {c: f"{c}_A" for c in ["name", "name_clean", "postcode", "postcode_clean", "key", SOURCE_COLUMN]}
+        if "ClientRef" in a_lookup.columns:
+            a_cols["ClientRef"] = "ClientRef"
         b_cols = {c: f"{c}_B" for c in ["name", "name_clean", "postcode", "postcode_clean", "key", SOURCE_COLUMN]}
+        if "GGBClientKey" in b_lookup.columns:
+            b_cols["GGBClientKey"] = "GGBClientKey"
 
         df_out = (
             df_pred
@@ -341,6 +345,7 @@ def _run(input_df):
         # Select and rename output columns
         keep = [
             "match_score", "match_band", "name_similarity",
+            "ClientRef", "GGBClientKey",
             "name_A", "name_B", "postcode_A", "postcode_B",
             "key_A", "key_B",
             f"{SOURCE_COLUMN}_A", f"{SOURCE_COLUMN}_B",
