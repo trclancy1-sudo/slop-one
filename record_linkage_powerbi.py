@@ -282,47 +282,58 @@ def _run(input_df):
         a_lookup = remaining_a.set_index("unique_id")
         b_lookup = remaining_b.set_index("unique_id")
 
-        rows = []
-        for _, row in df_pred.iterrows():
-            uid_a = row.get("unique_id_l") or row.get("unique_id_1")
-            uid_b = row.get("unique_id_r") or row.get("unique_id_2")
-            score = round(row["match_probability"], 4)
+        # Normalise Splink's uid column names (varies by version)
+        uid_l = "unique_id_l" if "unique_id_l" in df_pred.columns else "unique_id_1"
+        uid_r = "unique_id_r" if "unique_id_r" in df_pred.columns else "unique_id_2"
 
-            rec_a = a_lookup.loc[uid_a] if uid_a in a_lookup.index else pd.Series()
-            rec_b = b_lookup.loc[uid_b] if uid_b in b_lookup.index else pd.Series()
+        # Vectorised join: attach A and B columns to predictions in bulk
+        df_pred = df_pred.rename(columns={uid_l: "uid_a", uid_r: "uid_b"})
+        df_pred["match_score"] = df_pred["match_probability"].round(4)
 
-            pc_a = rec_a.get("postcode_clean")
-            pc_b = rec_b.get("postcode_clean")
-            if pc_a and pc_b and pc_a != pc_b:
-                continue
+        a_cols = {c: f"{c}_A" for c in ["name", "name_clean", "postcode", "postcode_clean", "key", SOURCE_COLUMN]}
+        b_cols = {c: f"{c}_B" for c in ["name", "name_clean", "postcode", "postcode_clean", "key", SOURCE_COLUMN]}
 
-            name_a_clean = rec_a.get("name_clean")
-            name_b_clean = rec_b.get("name_clean")
-            name_sim = JaroWinkler.similarity(
-                str(name_a_clean or ""), str(name_b_clean or "")
-            )
-            if name_a_clean and name_b_clean and name_sim < MIN_NAME_SIMILARITY:
-                continue
+        df_out = (
+            df_pred
+            .merge(a_lookup.rename(columns=a_cols), left_on="uid_a", right_index=True, how="left")
+            .merge(b_lookup.rename(columns=b_cols), left_on="uid_b", right_index=True, how="left")
+        )
 
-            band = "Auto-Accept" if score >= THRESHOLD_HIGH else "Review"
-            rows.append({
-                "match_score":      score,
-                "match_band":       band,
-                "name_similarity":  round(name_sim, 4),
-                "name_A":           rec_a.get("name"),
-                "name_B":           rec_b.get("name"),
-                "postcode_A":       rec_a.get("postcode"),
-                "postcode_B":       rec_b.get("postcode"),
-                "key_A":            rec_a.get("key"),
-                "key_B":            rec_b.get("key"),
-                "source_query_A":   rec_a.get("source_query"),
-                "source_query_B":   rec_b.get("source_query"),
-            })
+        # Filter: drop mismatched postcodes (vectorised)
+        pc_a = df_out["postcode_clean_A"]
+        pc_b = df_out["postcode_clean_B"]
+        both_have_pc = pc_a.notna() & pc_b.notna()
+        df_out = df_out[~(both_have_pc & (pc_a != pc_b))]
 
-        if rows:
-            df_out = pd.DataFrame(rows).sort_values("match_score", ascending=False)
-            auto_matches = df_out[df_out["match_band"] == "Auto-Accept"]
-            review_matches = df_out[df_out["match_band"] == "Review"]
+        # Name similarity (vectorised via list comp — much faster than iterrows)
+        name_a_vals = df_out["name_clean_A"].fillna("").astype(str).tolist()
+        name_b_vals = df_out["name_clean_B"].fillna("").astype(str).tolist()
+        df_out["name_similarity"] = [
+            round(JaroWinkler.similarity(a, b), 4)
+            for a, b in zip(name_a_vals, name_b_vals)
+        ]
+
+        # Filter: drop low name similarity where both names exist
+        both_have_name = df_out["name_clean_A"].notna() & df_out["name_clean_B"].notna()
+        df_out = df_out[~(both_have_name & (df_out["name_similarity"] < MIN_NAME_SIMILARITY))]
+
+        # Classify matches
+        df_out["match_band"] = df_out["match_score"].apply(
+            lambda s: "Auto-Accept" if s >= THRESHOLD_HIGH else "Review"
+        )
+
+        # Select and rename output columns
+        keep = [
+            "match_score", "match_band", "name_similarity",
+            "name_A", "name_B", "postcode_A", "postcode_B",
+            "key_A", "key_B",
+            f"{SOURCE_COLUMN}_A", f"{SOURCE_COLUMN}_B",
+        ]
+        df_out = df_out[[c for c in keep if c in df_out.columns]]
+        df_out = df_out.sort_values("match_score", ascending=False)
+
+        auto_matches = df_out[df_out["match_band"] == "Auto-Accept"]
+        review_matches = df_out[df_out["match_band"] == "Review"]
 
     # --- Combine results ---------------------------------------------------
     parts = []
