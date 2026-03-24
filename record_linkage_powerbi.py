@@ -57,10 +57,10 @@ MIN_NAME_SIMILARITY = 0.80
 # ALL LOGIC IN ONE FUNCTION -- so 'dataset' can be assigned at top level
 # =============================================================================
 
-def _run(pbi_vars):
+def _run(pbi_frames):
     """
-    Main entry point.  pbi_vars should be globals() from the top-level
-    scope so we can find Power BI's injected DataFrames.
+    Main entry point.  pbi_frames is a dict of {query_name: DataFrame}
+    captured at the top level where Power BI injects them.
     Returns a single DataFrame.
     """
 
@@ -83,18 +83,16 @@ def _run(pbi_vars):
     import splink.comparison_library as cl
     from rapidfuzz.distance import JaroWinkler
 
-    # --- Grab Power BI query DataFrames ------------------------------------
-    pbi_frames = {}
+    # --- Validate Power BI query DataFrames --------------------------------
     for qn in GROUP_A_QUERY_NAMES + GROUP_B_QUERY_NAMES:
-        df = pbi_vars.get(qn)
-        if df is None or not isinstance(df, pd.DataFrame):
+        if qn not in pbi_frames:
             return pd.DataFrame({
                 "Error": [
                     f"Query '{qn}' not found. "
-                    "Make sure you selected it before running the Python script step."
+                    "Make sure you selected it before running the Python script step. "
+                    f"Found queries: {list(pbi_frames.keys())}"
                 ]
             })
-        pbi_frames[qn] = df
 
     # --- Helpers -----------------------------------------------------------
     def collect_queries(query_names, col_map, group_label):
@@ -341,10 +339,24 @@ def _run(pbi_vars):
 
 
 # =============================================================================
-# TOP-LEVEL: 'dataset' assigned here so Power BI can always find it
+# TOP-LEVEL: capture Power BI DataFrames here, then run.
+# Power BI injects query DataFrames into the exec() locals, which may differ
+# from globals().  We must reference them BY NAME at the top level.
 # =============================================================================
+
+# Build dict of query DataFrames -- looked up at top level where PBI puts them.
+# Uses dir()/eval() to find DataFrames regardless of how PBI injects them.
+_pbi_frames = {}
+for _qn in GROUP_A_QUERY_NAMES + GROUP_B_QUERY_NAMES:
+    try:
+        _candidate = eval(_qn)
+        if isinstance(_candidate, pd.DataFrame):
+            _pbi_frames[_qn] = _candidate
+    except NameError:
+        pass
+
 try:
-    dataset = _run(globals())
+    dataset = _run(_pbi_frames)
 except Exception as _e:
     import traceback
     dataset = pd.DataFrame({
