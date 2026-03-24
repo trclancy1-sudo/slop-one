@@ -339,24 +339,29 @@ def _run(pbi_frames):
 
 
 # =============================================================================
-# TOP-LEVEL: capture Power BI DataFrames here, then run.
-# Power BI injects query DataFrames into the exec() locals, which may differ
-# from globals().  We must reference them BY NAME at the top level.
+# TOP-LEVEL: reference Power BI DataFrames by their LITERAL names.
+# Dynamic lookup (globals, locals, eval) does not work in Power BI's exec().
+# You MUST use the actual variable names that match your Power BI query names.
+#
+# IMPORTANT: If your Power BI queries have different names, change BOTH the
+# variable references below AND the GROUP_A/B_QUERY_NAMES lists above.
 # =============================================================================
-
-# Build dict of query DataFrames -- looked up at top level where PBI puts them.
-# Uses dir()/eval() to find DataFrames regardless of how PBI injects them.
-_pbi_frames = {}
-for _qn in GROUP_A_QUERY_NAMES + GROUP_B_QUERY_NAMES:
-    try:
-        _candidate = eval(_qn)
-        if isinstance(_candidate, pd.DataFrame):
-            _pbi_frames[_qn] = _candidate
-    except NameError:
-        pass
-
 try:
+    _pbi_frames = {
+        "GBS_Client": GBS_Client,
+        "GBS_WIN":    GBS_WIN,
+        "GGB_Client": GGB_Client,
+        "GGB_WIN":    GGB_WIN,
+    }
     dataset = _run(_pbi_frames)
+except NameError as _e:
+    dataset = pd.DataFrame({
+        "Error": [
+            f"Query not found: {_e}. "
+            "Check that your Power BI query names match the variable names "
+            "in this script (line ~350). Select all queries before running."
+        ],
+    })
 except Exception as _e:
     import traceback
     dataset = pd.DataFrame({
