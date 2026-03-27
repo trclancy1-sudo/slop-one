@@ -60,7 +60,7 @@ MIN_NAME_SIMILARITY = 0.80
 
 # Minimum name similarity for Review band — discard pairs below this entirely.
 # Prevents postcode-only matches from cluttering the review list.
-MIN_NAME_SIMILARITY_REVIEW = 0.50
+MIN_NAME_SIMILARITY_REVIEW = 0.70
 
 # --- Output ------------------------------------------------------------------
 OUTPUT_FILE = "matched_clients.xlsx"
