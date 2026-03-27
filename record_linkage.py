@@ -76,16 +76,13 @@ def load_group(files, col_map, group_label):
         df = pd.read_excel(path, dtype=str)
         df.columns = df.columns.str.strip()
 
+        # Keep original columns before renaming so they appear in output
         rename = {}
         for std_name, actual_name in col_map.items():
             if actual_name and actual_name in df.columns:
                 rename[actual_name] = std_name
 
         df = df.rename(columns=rename)
-
-        # Keep only standard columns that exist
-        keep = [c for c in ["key", "name", "postcode"] if c in df.columns]
-        df = df[keep].copy()
 
         df["_source_file"] = path
         frames.append(df)
