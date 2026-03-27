@@ -157,7 +157,9 @@ def clean_postcode(s):
     if pd.isna(s):
         return None
     s = re.sub(r"\s+", "", str(s).upper().strip())
-    return s or None
+    if not s or s == "UNKNOWN":
+        return None
+    return s
 
 
 def postcode_sector(pc):
