@@ -416,10 +416,40 @@ def write_output(exact_matches, auto_matches, review_matches,
                 df.to_excel(writer, sheet_name=name, index=False)
             print(f"  Sheet '{name}': {len(df):,} rows")
 
-        # Cross-group sheets
-        write_sheet(exact_matches, "Exact KEY Matches",  "exact key matches")
-        write_sheet(auto_matches,  "Auto-Accept Matches", "high-confidence matches")
-        write_sheet(review_matches,"Review Required",     "medium-confidence matches")
+        # Combine cross-group results into a single sheet
+        # Normalise exact match columns to align with probabilistic output
+        combined_parts = []
+        if not exact_matches.empty:
+            exact_norm = exact_matches.rename(columns={
+                "_source_file_A": "source_file_A",
+                "_source_file_B": "source_file_B",
+            })
+            exact_norm["match_type"] = "Exact KEY"
+            exact_norm["match_band"] = "Exact KEY"
+            if "name_similarity" not in exact_norm.columns:
+                exact_norm["name_similarity"] = None
+            combined_parts.append(exact_norm)
+        if not auto_matches.empty:
+            auto_copy = auto_matches.copy()
+            auto_copy["match_type"] = "Auto-Accept"
+            combined_parts.append(auto_copy)
+        if not review_matches.empty:
+            review_copy = review_matches.copy()
+            review_copy["match_type"] = "Review"
+            combined_parts.append(review_copy)
+
+        # Select consistent columns in display order
+        display_cols = ["match_type", "match_score", "name_similarity",
+                        "name_A", "name_B", "postcode_A", "postcode_B",
+                        "key_A", "key_B", "source_file_A", "source_file_B"]
+        if combined_parts:
+            cross_group = pd.concat(combined_parts, ignore_index=True)
+            # Keep only columns that exist
+            display_cols = [c for c in display_cols if c in cross_group.columns]
+            cross_group = cross_group[display_cols]
+        else:
+            cross_group = pd.DataFrame()
+        write_sheet(cross_group, "Cross-Group Matches", "cross-group matches")
 
         # Intra-group duplicate sheets
         intra_a_total = 0
