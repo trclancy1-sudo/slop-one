@@ -193,6 +193,20 @@ def exact_key_match(df_a, df_b):
     b_keyed = df_b[df_b["key_clean"].notna()].copy()
 
     matched = a_keyed.merge(b_keyed, on="key_clean", suffixes=("_A", "_B"))
+
+    # Columns unique to one side don't get merge suffixes — add them explicitly
+    shared_cols = set(a_keyed.columns) & set(b_keyed.columns)
+    a_only = set(a_keyed.columns) - shared_cols
+    b_only = set(b_keyed.columns) - shared_cols
+    rename_unsuffixed = {}
+    for col in a_only:
+        if col in matched.columns:
+            rename_unsuffixed[col] = f"{col}_A"
+    for col in b_only:
+        if col in matched.columns:
+            rename_unsuffixed[col] = f"{col}_B"
+    matched = matched.rename(columns=rename_unsuffixed)
+
     matched["match_type"] = "Exact KEY"
     matched["match_score"] = 1.0
 
