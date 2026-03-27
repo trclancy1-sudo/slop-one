@@ -215,15 +215,15 @@ def exact_key_match(df_a, df_b):
 # STEP 4 — Probabilistic matching with Splink
 # =============================================================================
 
-def probabilistic_match(df_a, df_b):
+def probabilistic_match(df_a, df_b, prefix_a="A", prefix_b="B"):
     if df_a.empty or df_b.empty:
         return pd.DataFrame()
 
     # Splink needs a unique 'unique_id' column
     df_a = df_a.copy()
     df_b = df_b.copy()
-    df_a["unique_id"] = "A_" + df_a["_id"].astype(str)
-    df_b["unique_id"] = "B_" + df_b["_id"].astype(str)
+    df_a["unique_id"] = f"{prefix_a}_" + df_a["_id"].astype(str)
+    df_b["unique_id"] = f"{prefix_b}_" + df_b["_id"].astype(str)
 
     # Build comparison columns list (only use columns that exist)
     comparisons = []
@@ -277,17 +277,17 @@ def probabilistic_match(df_a, df_b):
     linker.training.estimate_u_using_random_sampling(max_pairs=1_000_000)
 
     if has_name:
-    try:
-        # First pass — train on postcode sector blocks
-        linker.training.estimate_parameters_using_expectation_maximisation(
-            block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
-        )
-        # Second pass — train on name prefix blocks to improve name u-values
-        linker.training.estimate_parameters_using_expectation_maximisation(
-            block_on("substr(name_clean, 1, 3)")
-        )
-    except Exception:
-        pass # Fall back to u-only estimates
+        try:
+            # First pass — train on postcode sector blocks
+            linker.training.estimate_parameters_using_expectation_maximisation(
+                block_on("postcode_sector") if has_pc else block_on("substr(name_clean, 1, 4)")
+            )
+            # Second pass — train on name prefix blocks to improve name u-values
+            linker.training.estimate_parameters_using_expectation_maximisation(
+                block_on("substr(name_clean, 1, 3)")
+            )
+        except Exception:
+            pass  # Fall back to u-only estimates
 
 
     print("  Generating predictions...")
@@ -302,7 +302,7 @@ def probabilistic_match(df_a, df_b):
 # STEP 5 — Format output
 # =============================================================================
 
-def format_predictions(df_pred, df_a, df_b):
+def format_predictions(df_pred, df_a, df_b, label_a="A", label_b="B"):
     if df_pred.empty:
         return pd.DataFrame(), pd.DataFrame()
 
@@ -337,14 +337,14 @@ def format_predictions(df_pred, df_a, df_b):
                                     str(rec_a.get("name_clean") or ""),
                                     str(rec_b.get("name_clean") or "")
                                 ), 4),
-            "name_A":           rec_a.get("name"),
-            "name_B":           rec_b.get("name"),
-            "postcode_A":       rec_a.get("postcode"),
-            "postcode_B":       rec_b.get("postcode"),
-            "key_A":            rec_a.get("key"),
-            "key_B":            rec_b.get("key"),
-            "source_file_A":    rec_a.get("_source_file"),
-            "source_file_B":    rec_b.get("_source_file"),
+            f"name_{label_a}":           rec_a.get("name"),
+            f"name_{label_b}":           rec_b.get("name"),
+            f"postcode_{label_a}":       rec_a.get("postcode"),
+            f"postcode_{label_b}":       rec_b.get("postcode"),
+            f"key_{label_a}":            rec_a.get("key"),
+            f"key_{label_b}":            rec_b.get("key"),
+            f"source_file_{label_a}":    rec_a.get("_source_file"),
+            f"source_file_{label_b}":    rec_b.get("_source_file"),
         })
 
     df_out = pd.DataFrame(rows).sort_values("match_score", ascending=False)
@@ -354,10 +354,52 @@ def format_predictions(df_pred, df_a, df_b):
 
 
 # =============================================================================
+# STEP 5b — Intra-group duplicate detection
+# =============================================================================
+
+def intra_group_duplicates(df_group, group_label):
+    """Find duplicates between the two source files within a single group."""
+    source_files = df_group["_source_file"].unique()
+    if len(source_files) < 2:
+        print(f"  Group {group_label}: only one source file, skipping intra-group check.")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    df_file1 = df_group[df_group["_source_file"] == source_files[0]].copy()
+    df_file2 = df_group[df_group["_source_file"] == source_files[1]].copy()
+
+    print(f"  Group {group_label}: {source_files[0]} ({len(df_file1):,}) "
+          f"vs {source_files[1]} ({len(df_file2):,})")
+
+    # Assign unique IDs for this intra-group comparison
+    df_file1 = df_file1.reset_index(drop=True)
+    df_file2 = df_file2.reset_index(drop=True)
+    df_file1["_id"] = df_file1.index
+    df_file2["_id"] = df_file2.index
+    df_file1["unique_id"] = f"{group_label}1_" + df_file1["_id"].astype(str)
+    df_file2["unique_id"] = f"{group_label}2_" + df_file2["_id"].astype(str)
+
+    # Exact KEY matching
+    exact, remaining_1, remaining_2 = exact_key_match(df_file1, df_file2)
+
+    # Probabilistic matching on remainder
+    df_pred = probabilistic_match(
+        remaining_1, remaining_2,
+        prefix_a=f"{group_label}1", prefix_b=f"{group_label}2"
+    )
+    auto, review = format_predictions(
+        df_pred, remaining_1, remaining_2,
+        label_a="File1", label_b="File2"
+    )
+
+    return exact, auto, review
+
+
+# =============================================================================
 # STEP 6 — Write Excel output
 # =============================================================================
 
-def write_output(exact_matches, auto_matches, review_matches):
+def write_output(exact_matches, auto_matches, review_matches,
+                 intra_a_results=None, intra_b_results=None):
     with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as writer:
 
         def write_sheet(df, name, desc):
@@ -369,22 +411,39 @@ def write_output(exact_matches, auto_matches, review_matches):
                 df.to_excel(writer, sheet_name=name, index=False)
             print(f"  Sheet '{name}': {len(df):,} rows")
 
+        # Cross-group sheets
         write_sheet(exact_matches, "Exact KEY Matches",  "exact key matches")
         write_sheet(auto_matches,  "Auto-Accept Matches", "high-confidence matches")
         write_sheet(review_matches,"Review Required",     "medium-confidence matches")
 
+        # Intra-group duplicate sheets
+        intra_a_total = 0
+        intra_b_total = 0
+        if intra_a_results:
+            exact_a, auto_a, review_a = intra_a_results
+            intra_a_combined = pd.concat([exact_a, auto_a, review_a], ignore_index=True)
+            intra_a_total = len(intra_a_combined)
+            write_sheet(intra_a_combined, "Group A Duplicates",
+                        "intra-group A duplicates")
+        if intra_b_results:
+            exact_b, auto_b, review_b = intra_b_results
+            intra_b_combined = pd.concat([exact_b, auto_b, review_b], ignore_index=True)
+            intra_b_total = len(intra_b_combined)
+            write_sheet(intra_b_combined, "Group B Duplicates",
+                        "intra-group B duplicates")
+
         # Summary sheet
-        summary = pd.DataFrame({
-            "Category":    ["Exact KEY Matches", "Auto-Accept (Probabilistic)",
-                            "Review Required",   "Total Matched"],
-            "Count":       [len(exact_matches),  len(auto_matches),
-                            len(review_matches),
-                            len(exact_matches) + len(auto_matches) + len(review_matches)],
-            "Threshold":   [f"KEY match",
-                            f"Score ≥ {THRESHOLD_HIGH}",
-                            f"Score {THRESHOLD_LOW}–{THRESHOLD_HIGH}",
-                            ""]
-        })
+        summary_rows = [
+            ("Cross-Group: Exact KEY Matches", len(exact_matches), "KEY match"),
+            ("Cross-Group: Auto-Accept", len(auto_matches), f"Score ≥ {THRESHOLD_HIGH}"),
+            ("Cross-Group: Review Required", len(review_matches),
+             f"Score {THRESHOLD_LOW}–{THRESHOLD_HIGH}"),
+            ("Cross-Group: Total", len(exact_matches) + len(auto_matches) + len(review_matches),
+             ""),
+            ("Group A Intra-Duplicates", intra_a_total, "Between files in Group A"),
+            ("Group B Intra-Duplicates", intra_b_total, "Between files in Group B"),
+        ]
+        summary = pd.DataFrame(summary_rows, columns=["Category", "Count", "Threshold"])
         summary.to_excel(writer, sheet_name="Summary", index=False)
 
     print(f"\n✅  Output written to: {OUTPUT_FILE}")
@@ -400,14 +459,14 @@ def main():
     print("=" * 60)
 
     # Load
-    print("\n[1/5] Loading files...")
+    print("\n[1/7] Loading files...")
     df_a = load_group(GROUP_A_FILES, GROUP_A_COLUMNS, "A")
     df_b = load_group(GROUP_B_FILES, GROUP_B_COLUMNS, "B")
     print(f"  Group A records: {len(df_a):,}")
     print(f"  Group B records: {len(df_b):,}")
 
     # Standardise
-    print("\n[2/5] Standardising data...")
+    print("\n[2/7] Standardising data...")
     df_a = standardise(df_a).reset_index(drop=True)
     df_b = standardise(df_b).reset_index(drop=True)
     df_a["_id"] = df_a.index
@@ -416,24 +475,41 @@ def main():
     df_b["unique_id"] = "B_" + df_b["_id"].astype(str)
 
     # Exact KEY match
-    print("\n[3/5] Running exact KEY matching...")
+    print("\n[3/7] Running exact KEY matching...")
     exact_matches, remaining_a, remaining_b = exact_key_match(df_a, df_b)
     print(f"  Remaining A: {len(remaining_a):,}  |  Remaining B: {len(remaining_b):,}")
 
     # Probabilistic match on remainder
-    print("\n[4/5] Running probabilistic matching (Splink)...")
+    print("\n[4/7] Running probabilistic matching (Splink)...")
     df_pred = probabilistic_match(remaining_a, remaining_b)
     auto_matches, review_matches = format_predictions(df_pred, remaining_a, remaining_b)
     print(f"  Auto-accept: {len(auto_matches):,}  |  For review: {len(review_matches):,}")
 
+    # Intra-group duplicate detection
+    print("\n[5/7] Finding intra-group duplicates in Group A...")
+    intra_a_results = intra_group_duplicates(df_a, "A")
+    intra_a_exact, intra_a_auto, intra_a_review = intra_a_results
+    intra_a_total = len(intra_a_exact) + len(intra_a_auto) + len(intra_a_review)
+    print(f"  Group A intra-duplicates: {intra_a_total:,}")
+
+    print("\n[6/7] Finding intra-group duplicates in Group B...")
+    intra_b_results = intra_group_duplicates(df_b, "B")
+    intra_b_exact, intra_b_auto, intra_b_review = intra_b_results
+    intra_b_total = len(intra_b_exact) + len(intra_b_auto) + len(intra_b_review)
+    print(f"  Group B intra-duplicates: {intra_b_total:,}")
+
     # Write output
-    print("\n[5/5] Writing output...")
-    write_output(exact_matches, auto_matches, review_matches)
+    print("\n[7/7] Writing output...")
+    write_output(exact_matches, auto_matches, review_matches,
+                 intra_a_results=intra_a_results,
+                 intra_b_results=intra_b_results)
 
     print("\nDone.")
-    print(f"  Exact KEY matches:            {len(exact_matches):>8,}")
-    print(f"  Probabilistic auto-accepts:   {len(auto_matches):>8,}")
-    print(f"  Flagged for manual review:    {len(review_matches):>8,}")
+    print(f"  Cross-group exact KEY:        {len(exact_matches):>8,}")
+    print(f"  Cross-group auto-accepts:     {len(auto_matches):>8,}")
+    print(f"  Cross-group manual review:    {len(review_matches):>8,}")
+    print(f"  Group A intra-duplicates:     {intra_a_total:>8,}")
+    print(f"  Group B intra-duplicates:     {intra_b_total:>8,}")
     print("=" * 60)
 
 
