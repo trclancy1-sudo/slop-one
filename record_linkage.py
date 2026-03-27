@@ -418,39 +418,51 @@ def write_output(exact_matches, auto_matches, review_matches,
                 df.to_excel(writer, sheet_name=name, index=False)
             print(f"  Sheet '{name}': {len(df):,} rows")
 
-        # Combine cross-group results into a single sheet
-        # Normalise exact match columns to align with probabilistic output
-        combined_parts = []
-        if not exact_matches.empty:
-            exact_norm = exact_matches.rename(columns={
-                "_source_file_A": "source_file_A",
-                "_source_file_B": "source_file_B",
-            })
-            exact_norm["match_type"] = "Exact KEY"
-            exact_norm["match_band"] = "Exact KEY"
-            if "name_similarity" not in exact_norm.columns:
-                exact_norm["name_similarity"] = None
-            combined_parts.append(exact_norm)
-        if not auto_matches.empty:
-            auto_copy = auto_matches.copy()
-            auto_copy["match_type"] = "Auto-Accept"
-            combined_parts.append(auto_copy)
-        if not review_matches.empty:
-            review_copy = review_matches.copy()
-            review_copy["match_type"] = "Review"
-            combined_parts.append(review_copy)
+        def combine_results(exact, auto, review, file_suffix_a="_A", file_suffix_b="_B",
+                            label_a="File1", label_b="File2"):
+            """Normalise and combine exact/auto/review into one DataFrame."""
+            display_cols = ["match_type", "match_score", "name_similarity",
+                            f"name_{label_a}", f"name_{label_b}",
+                            f"postcode_{label_a}", f"postcode_{label_b}",
+                            f"key_{label_a}", f"key_{label_b}",
+                            f"source_file_{label_a}", f"source_file_{label_b}"]
+            parts = []
+            if not exact.empty:
+                exact_norm = exact.rename(columns={
+                    f"name{file_suffix_a}": f"name_{label_a}",
+                    f"name{file_suffix_b}": f"name_{label_b}",
+                    f"postcode{file_suffix_a}": f"postcode_{label_a}",
+                    f"postcode{file_suffix_b}": f"postcode_{label_b}",
+                    f"key{file_suffix_a}": f"key_{label_a}",
+                    f"key{file_suffix_b}": f"key_{label_b}",
+                    f"_source_file{file_suffix_a}": f"source_file_{label_a}",
+                    f"_source_file{file_suffix_b}": f"source_file_{label_b}",
+                })
+                exact_norm["match_type"] = "Exact KEY"
+                exact_norm["match_band"] = "Exact KEY"
+                if "name_similarity" not in exact_norm.columns:
+                    exact_norm["name_similarity"] = None
+                parts.append(exact_norm)
+            if not auto.empty:
+                auto_copy = auto.copy()
+                auto_copy["match_type"] = "Auto-Accept"
+                parts.append(auto_copy)
+            if not review.empty:
+                review_copy = review.copy()
+                review_copy["match_type"] = "Review"
+                parts.append(review_copy)
+            if parts:
+                combined = pd.concat(parts, ignore_index=True)
+                cols = [c for c in display_cols if c in combined.columns]
+                return combined[cols]
+            return pd.DataFrame()
 
-        # Select consistent columns in display order
-        display_cols = ["match_type", "match_score", "name_similarity",
-                        "name_A", "name_B", "postcode_A", "postcode_B",
-                        "key_A", "key_B", "source_file_A", "source_file_B"]
-        if combined_parts:
-            cross_group = pd.concat(combined_parts, ignore_index=True)
-            # Keep only columns that exist
-            display_cols = [c for c in display_cols if c in cross_group.columns]
-            cross_group = cross_group[display_cols]
-        else:
-            cross_group = pd.DataFrame()
+        # Cross-group sheet
+        cross_group = combine_results(
+            exact_matches, auto_matches, review_matches,
+            file_suffix_a="_A", file_suffix_b="_B",
+            label_a="A", label_b="B"
+        )
         write_sheet(cross_group, "Cross-Group Matches", "cross-group matches")
 
         # Intra-group duplicate sheets
@@ -458,13 +470,21 @@ def write_output(exact_matches, auto_matches, review_matches,
         intra_b_total = 0
         if intra_a_results:
             exact_a, auto_a, review_a = intra_a_results
-            intra_a_combined = pd.concat([exact_a, auto_a, review_a], ignore_index=True)
+            intra_a_combined = combine_results(
+                exact_a, auto_a, review_a,
+                file_suffix_a="_A", file_suffix_b="_B",
+                label_a="File1", label_b="File2"
+            )
             intra_a_total = len(intra_a_combined)
             write_sheet(intra_a_combined, "Group A Duplicates",
                         "intra-group A duplicates")
         if intra_b_results:
             exact_b, auto_b, review_b = intra_b_results
-            intra_b_combined = pd.concat([exact_b, auto_b, review_b], ignore_index=True)
+            intra_b_combined = combine_results(
+                exact_b, auto_b, review_b,
+                file_suffix_a="_A", file_suffix_b="_B",
+                label_a="File1", label_b="File2"
+            )
             intra_b_total = len(intra_b_combined)
             write_sheet(intra_b_combined, "Group B Duplicates",
                         "intra-group B duplicates")
