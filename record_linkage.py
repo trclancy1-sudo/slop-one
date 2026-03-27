@@ -87,14 +87,6 @@ def load_group(files, col_map, group_label):
         keep = [c for c in ["key", "name", "postcode"] if c in df.columns]
         df = df[keep].copy()
 
-        # Retain all original columns for output context
-        original = pd.read_excel(path, dtype=str)
-        original.columns = original.columns.str.strip()
-        df = pd.concat([df, original.drop(
-            columns=[v for v in col_map.values() if v and v in original.columns],
-            errors="ignore"
-        )], axis=1)
-
         df["_source_file"] = path
         frames.append(df)
 
@@ -348,13 +340,16 @@ def format_predictions(df_pred, df_a, df_b, label_a="A", label_b="B"):
         }
         # Internal columns to exclude from output
         _internal = {"_id", "_group", "unique_id", "name_clean", "name_sorted",
-                     "postcode_clean", "postcode_sector", "key_clean"}
+                     "postcode_clean", "postcode_sector", "key_clean",
+                     "_source_file"}
         for col in rec_a.index:
             if col not in _internal:
                 row_data[f"{col}_{label_a}"] = rec_a.get(col)
+        row_data[f"source_file_{label_a}"] = rec_a.get("_source_file")
         for col in rec_b.index:
             if col not in _internal:
                 row_data[f"{col}_{label_b}"] = rec_b.get(col)
+        row_data[f"source_file_{label_b}"] = rec_b.get("_source_file")
         rows.append(row_data)
 
     df_out = pd.DataFrame(rows).sort_values("match_score", ascending=False)
