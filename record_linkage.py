@@ -340,19 +340,22 @@ def format_predictions(df_pred, df_a, df_b, label_a="A", label_b="B"):
         if band == "Review" and name_sim < MIN_NAME_SIMILARITY_REVIEW:
             continue
 
-        rows.append({
+        # Build row with match metadata + all original columns from both sides
+        row_data = {
             "match_score":      score,
             "match_band":       band,
             "name_similarity":  round(name_sim, 4),
-            f"name_{label_a}":           rec_a.get("name"),
-            f"name_{label_b}":           rec_b.get("name"),
-            f"postcode_{label_a}":       rec_a.get("postcode"),
-            f"postcode_{label_b}":       rec_b.get("postcode"),
-            f"key_{label_a}":            rec_a.get("key"),
-            f"key_{label_b}":            rec_b.get("key"),
-            f"source_file_{label_a}":    rec_a.get("_source_file"),
-            f"source_file_{label_b}":    rec_b.get("_source_file"),
-        })
+        }
+        # Internal columns to exclude from output
+        _internal = {"_id", "_group", "unique_id", "name_clean", "name_sorted",
+                     "postcode_clean", "postcode_sector", "key_clean"}
+        for col in rec_a.index:
+            if col not in _internal:
+                row_data[f"{col}_{label_a}"] = rec_a.get(col)
+        for col in rec_b.index:
+            if col not in _internal:
+                row_data[f"{col}_{label_b}"] = rec_b.get(col)
+        rows.append(row_data)
 
     df_out = pd.DataFrame(rows).sort_values("match_score", ascending=False)
     auto    = df_out[df_out["match_band"] == "Auto-Accept"]
@@ -421,25 +424,36 @@ def write_output(exact_matches, auto_matches, review_matches,
         def combine_results(exact, auto, review, file_suffix_a="_A", file_suffix_b="_B",
                             label_a="File1", label_b="File2"):
             """Normalise and combine exact/auto/review into one DataFrame."""
-            display_cols = ["match_type", "match_score", "name_similarity",
-                            f"name_{label_a}", f"name_{label_b}",
-                            f"postcode_{label_a}", f"postcode_{label_b}",
-                            f"key_{label_a}", f"key_{label_b}",
-                            f"source_file_{label_a}", f"source_file_{label_b}"]
+            _internal = {"_id", "_group", "unique_id", "name_clean", "name_sorted",
+                         "postcode_clean", "postcode_sector", "key_clean",
+                         "match_type", "match_score", "match_band"}
             parts = []
             if not exact.empty:
-                exact_norm = exact.rename(columns={
-                    f"name{file_suffix_a}": f"name_{label_a}",
-                    f"name{file_suffix_b}": f"name_{label_b}",
-                    f"postcode{file_suffix_a}": f"postcode_{label_a}",
-                    f"postcode{file_suffix_b}": f"postcode_{label_b}",
-                    f"key{file_suffix_a}": f"key_{label_a}",
-                    f"key{file_suffix_b}": f"key_{label_b}",
-                    f"_source_file{file_suffix_a}": f"source_file_{label_a}",
-                    f"_source_file{file_suffix_b}": f"source_file_{label_b}",
-                })
+                # Rename all merge-suffixed columns to label-based names
+                rename_map = {}
+                for col in exact.columns:
+                    if col.endswith(file_suffix_a):
+                        base = col[: -len(file_suffix_a)]
+                        if base.startswith("_"):
+                            base = base[1:]  # _source_file -> source_file
+                        if base not in _internal and col not in _internal:
+                            rename_map[col] = f"{base}_{label_a}"
+                    elif col.endswith(file_suffix_b):
+                        base = col[: -len(file_suffix_b)]
+                        if base.startswith("_"):
+                            base = base[1:]
+                        if base not in _internal and col not in _internal:
+                            rename_map[col] = f"{base}_{label_b}"
+                exact_norm = exact.rename(columns=rename_map)
+                # Drop internal columns
+                exact_norm = exact_norm.drop(
+                    columns=[c for c in exact_norm.columns
+                             if c in _internal or c.rstrip("_AB12") in _internal],
+                    errors="ignore"
+                )
                 exact_norm["match_type"] = "Exact KEY"
                 exact_norm["match_band"] = "Exact KEY"
+                exact_norm["match_score"] = 1.0
                 if "name_similarity" not in exact_norm.columns:
                     exact_norm["name_similarity"] = None
                 parts.append(exact_norm)
@@ -453,8 +467,11 @@ def write_output(exact_matches, auto_matches, review_matches,
                 parts.append(review_copy)
             if parts:
                 combined = pd.concat(parts, ignore_index=True)
-                cols = [c for c in display_cols if c in combined.columns]
-                return combined[cols]
+                # Move match metadata columns to the front
+                front = ["match_type", "match_score", "name_similarity"]
+                front = [c for c in front if c in combined.columns]
+                rest = [c for c in combined.columns if c not in front]
+                return combined[front + rest]
             return pd.DataFrame()
 
         # Cross-group sheet
