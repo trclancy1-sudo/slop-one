@@ -532,30 +532,6 @@ export class Visual implements IVisual {
         this.chartGroup.selectAll("*").remove();
         if (data.length === 0) return;
 
-        // Layout constants (must match update() margin calculation)
-        const PAD = 4;
-        const GAP = 6;
-        const legFS = this.formattingSettings.legendCard.fontSize.value;
-        const showLegend = this.formattingSettings.legendCard.show.value;
-        let legendH = 0, legendW = 0;
-        if (showLegend && series.length > 0) {
-            const legendPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
-            if (legendPos === "top" || legendPos === "bottom") {
-                const availLegW = Math.max(100, plotWidth);
-                const rowH = legFS + 10;
-                let rowX = 0, rows = 1;
-                series.forEach(s => {
-                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
-                    if (rowX + itemW > availLegW && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
-                });
-                legendH = rows * rowH;
-            } else {
-                legendH = series.length * (legFS + 8);
-                const maxNameLen = Math.max(...series.map(s => s.name.length));
-                legendW = 14 + maxNameLen * legFS * 0.55 + 8;
-            }
-        }
-
         const tooltipDiv = this.tooltipDiv;
         const selectionManager = this.selectionManager;
         const animDuration = this.formattingSettings.animationCard.duration.value || 800;
@@ -957,35 +933,37 @@ export class Visual implements IVisual {
         }
 
         // ── Legend ──
-        // Each element is placed exactly in the space reserved for it by the margin calculation.
-        // chartGroup origin is at (margin.left, margin.top) in viewport coordinates.
         const showLeg = this.formattingSettings.legendCard.show.value;
         if (showLeg && series.length > 0) {
             const legFS = this.formattingSettings.legendCard.fontSize.value;
             const legFC = this.formattingSettings.legendCard.fontColor.value.value;
             const legPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
             const legG = this.chartGroup.append("g").classed("legend", true);
+            const legRowH = legFS + 10;
+
+            // Compute actual legend height for positioning
+            let legTotalH = legRowH;
+            if (legPos === "bottom" || legPos === "top") {
+                let rowX = 0, rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > plotWidth && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
+                });
+                legTotalH = rows * legRowH;
+            }
 
             if (legPos === "bottom") {
-                // Legend sits below the chart + x-axis, at the bottom of the viewport.
-                // In chart coords: plotHeight puts us at the x-axis baseline,
-                // then skip past xAxisH + GAP to reach the legend area.
-                const xAxisH = margin.bottom - PAD - legendH - GAP;
-                legG.attr("transform", `translate(0,${plotHeight + xAxisH + GAP + legFS})`);
+                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - 4 - legTotalH + legFS})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
-                // Legend sits at the top of the viewport, above the chart.
-                // In chart coords: -margin.top reaches the viewport top edge,
-                // then PAD + legFS for the first text baseline.
-                legG.attr("transform", `translate(0,${-margin.top + PAD + legFS})`);
+                legG.attr("transform", `translate(0,${-margin.top + 4 + legFS})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "left") {
-                // Legend sits to the left of the chart, in the left margin.
-                legG.attr("transform", `translate(${-margin.left + PAD},${legFS})`);
+                legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             } else if (legPos === "right") {
-                // Legend sits to the right of the chart, in the right margin.
-                legG.attr("transform", `translate(${plotWidth + margin.right - legendW - PAD},${legFS})`);
+                const rightAxisW = this.formattingSettings.yAxisCard.show.value ? yFS * 3.5 + 6 : 0;
+                legG.attr("transform", `translate(${plotWidth + rightAxisW + 8},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }
