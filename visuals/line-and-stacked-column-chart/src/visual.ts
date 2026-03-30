@@ -265,19 +265,13 @@ export class Visual implements IVisual {
         let legendH = 0, legendW = 0;
         if (showLegend && series.length > 0) {
             if (legendPos === "top" || legendPos === "bottom") {
-                // Estimate how many rows the legend needs based on available width
+                // Estimate rows needed based on available width
                 const availLegW = Math.max(100, width - 20);
                 const rowH = legFS + 10;
-                let rowX = 0;
-                let rows = 1;
+                let rowX = 0, rows = 1;
                 series.forEach(s => {
                     const itemW = 16 + s.name.length * legFS * 0.55 + 30;
-                    if (rowX + itemW > availLegW && rowX > 0) {
-                        rows++;
-                        rowX = itemW;
-                    } else {
-                        rowX += itemW;
-                    }
+                    if (rowX + itemW > availLegW && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
                 });
                 legendH = rows * rowH;
             } else {
@@ -292,16 +286,11 @@ export class Visual implements IVisual {
         // X-axis label height: rotated at -35°, estimate from longest category label
         let xAxisH = 0;
         if (showXA) {
-            const xLabelMaxWEst = Math.max(60, xFS * 6); // rough bandwidth estimate for margin calc
-            const minFS = 9;
-            const effFS = Math.max(minFS, Math.min(xFS, xLabelMaxWEst / 0.55 / 2));
             const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
-            const charW = effFS * 0.55;
-            const maxCharsEst = Math.max(1, Math.floor(xLabelMaxWEst / charW));
-            const displayLen = Math.min(maxCatLen, maxCharsEst);
-            const labelW = displayLen * charW;
+            const charW = xFS * 0.55;
+            const labelW = maxCatLen * charW;
             // Height contribution of rotated text: labelW * sin(35°) + fontSize * cos(35°)
-            xAxisH = labelW * Math.sin(35 * Math.PI / 180) + effFS * Math.cos(35 * Math.PI / 180);
+            xAxisH = labelW * Math.sin(35 * Math.PI / 180) + xFS * Math.cos(35 * Math.PI / 180);
             xAxisH = Math.min(xAxisH, height * 0.3); // cap at 30% of visual height
             xAxisH += 6; // tick mark + padding
             if (xTitle) xAxisH += xFS + 6;
@@ -320,13 +309,12 @@ export class Visual implements IVisual {
             }
         }
 
-        // Assemble margins — each element declares its full space requirement.
-        // The chart area (plotWidth × plotHeight) gets whatever remains.
+        // Assemble margins — each edge accounts for its sections with explicit gaps
         const PAD = 4; // base padding from visual edge
         const GAP = 6; // gap between adjacent sections
         const margin = { top: PAD, right: PAD, bottom: PAD, left: PAD };
 
-        // Bottom: x-axis labels + legend (if bottom)
+        // Bottom: x-axis labels + gap + legend (if bottom)
         margin.bottom += xAxisH;
         if (showLegend && legendPos === "bottom") {
             margin.bottom += GAP + legendH;
@@ -585,7 +573,7 @@ export class Visual implements IVisual {
             const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(xScale.bandwidth(), 60);
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
-            // Power BI-style label sizing: cap font size, then truncate with ellipsis
+            // Power BI-style: cap font size (min 9px), then truncate with ellipsis
             const minFontSize = 9;
             const effectiveXFS = Math.max(minFontSize, Math.min(xFS, xLabelMaxW / 0.55 / 2));
             xa.selectAll(".tick text").each(function () {
@@ -595,7 +583,6 @@ export class Visual implements IVisual {
                     .style("font-family", `"${xFF}", sans-serif`)
                     .attr("transform", "rotate(-35)").style("text-anchor", "end");
 
-                // Truncate with ellipsis if text exceeds max width
                 const charW = effectiveXFS * 0.55;
                 const maxChars = Math.max(1, Math.floor(xLabelMaxW / charW));
                 let displayText = fullText;
@@ -933,6 +920,7 @@ export class Visual implements IVisual {
         }
 
         // ── Legend ──
+        // Legend is positioned within its reserved margin space, never overlapping the chart or axes.
         const showLeg = this.formattingSettings.legendCard.show.value;
         if (showLeg && series.length > 0) {
             const legFS = this.formattingSettings.legendCard.fontSize.value;
@@ -941,7 +929,7 @@ export class Visual implements IVisual {
             const legG = this.chartGroup.append("g").classed("legend", true);
             const legRowH = legFS + 10;
 
-            // Compute actual legend height for positioning
+            // Compute actual legend height for bottom/top positioning
             let legTotalH = legRowH;
             if (legPos === "bottom" || legPos === "top") {
                 let rowX = 0, rows = 1;
@@ -953,15 +941,16 @@ export class Visual implements IVisual {
             }
 
             if (legPos === "bottom") {
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - 4 - legTotalH + legFS})`);
+                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legTotalH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
-                legG.attr("transform", `translate(0,${-margin.top + 4 + legFS})`);
+                legG.attr("transform", `translate(0,${-margin.top + legRowH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "left") {
                 legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             } else if (legPos === "right") {
+                // Right of right y-axis
                 const rightAxisW = this.formattingSettings.yAxisCard.show.value ? yFS * 3.5 + 6 : 0;
                 legG.attr("transform", `translate(${plotWidth + rightAxisW + 8},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
@@ -976,7 +965,6 @@ export class Visual implements IVisual {
         const rowH = fs + 10;
         series.forEach(s => {
             const estItemW = 16 + s.name.length * fs * 0.55 + 30;
-            // Wrap to next row if this item won't fit
             if (xOff + estItemW > maxWidth && xOff > 0) {
                 row++;
                 xOff = 0;
@@ -992,7 +980,7 @@ export class Visual implements IVisual {
             const t = item.append("text").classed("legend-text", true).attr("x", 16).attr("y", 0)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
             const textW = (t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * fs * 0.55;
-            xOff += Math.min(textW, maxWidth - xOff) + 30;
+            xOff += textW + 30;
         });
     }
 
