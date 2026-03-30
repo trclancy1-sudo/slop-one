@@ -331,9 +331,9 @@ export class Visual implements IVisual {
             margin.bottom += GAP + legendH;
         }
 
-        // Top: legend (if top)
+        // Top: legend (if top) — extra padding to avoid overlap with Power BI visual title
         if (showLegend && legendPos === "top") {
-            margin.top += legendH + GAP;
+            margin.top += legendH + GAP + 4;
         }
 
         // Left: y-axis left + legend (if left)
@@ -963,8 +963,8 @@ export class Visual implements IVisual {
                 legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legTotalH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
-                // Place legend at the very top of the margin
-                legG.attr("transform", `translate(0,${-margin.top + legRowH})`);
+                // Place legend above the chart, within the top margin space
+                legG.attr("transform", `translate(0,${-margin.top + 8 + legRowH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "left") {
                 legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
