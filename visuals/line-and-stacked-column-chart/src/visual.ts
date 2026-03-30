@@ -279,11 +279,16 @@ export class Visual implements IVisual {
         // X-axis label height: rotated at -35°, estimate from longest category label
         let xAxisH = 0;
         if (showXA) {
+            const xLabelMaxWEst = Math.max(60, xFS * 6); // rough bandwidth estimate for margin calc
+            const minFS = 9;
+            const effFS = Math.max(minFS, Math.min(xFS, xLabelMaxWEst / 0.55 / 2));
             const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
-            const charW = xFS * 0.55;
-            const labelW = maxCatLen * charW;
+            const charW = effFS * 0.55;
+            const maxCharsEst = Math.max(1, Math.floor(xLabelMaxWEst / charW));
+            const displayLen = Math.min(maxCatLen, maxCharsEst);
+            const labelW = displayLen * charW;
             // Height contribution of rotated text: labelW * sin(35°) + fontSize * cos(35°)
-            xAxisH = labelW * Math.sin(35 * Math.PI / 180) + xFS * Math.cos(35 * Math.PI / 180);
+            xAxisH = labelW * Math.sin(35 * Math.PI / 180) + effFS * Math.cos(35 * Math.PI / 180);
             xAxisH = Math.min(xAxisH, height * 0.3); // cap at 30% of visual height
             xAxisH += 6; // tick mark + padding
             if (xTitle) xAxisH += xFS + 6;
@@ -566,39 +571,24 @@ export class Visual implements IVisual {
             const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(xScale.bandwidth(), 60);
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
-            // Replace default tick text with wrapped text
+            // Power BI-style label sizing: cap font size, then truncate with ellipsis
+            const minFontSize = 9;
+            const effectiveXFS = Math.max(minFontSize, Math.min(xFS, xLabelMaxW / 0.55 / 2));
             xa.selectAll(".tick text").each(function () {
                 const textEl = d3.select(this);
                 const fullText = textEl.text();
-                textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
+                textEl.text(null).style("font-size", `${effectiveXFS}px`).style("fill", xFC)
                     .style("font-family", `"${xFF}", sans-serif`)
                     .attr("transform", "rotate(-35)").style("text-anchor", "end");
 
-                // Split into words and wrap
-                const words = fullText.split(/\s+/);
-                let line = "";
-                let lineNum = 0;
-                const lineHeight = xFS * 1.2;
-
-                words.forEach((word, wi) => {
-                    const testLine = line ? line + " " + word : word;
-                    // Estimate width: ~0.6em per char at given font size
-                    const estWidth = testLine.length * xFS * 0.55;
-                    if (estWidth > xLabelMaxW && line) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                        line = word;
-                        lineNum++;
-                    } else {
-                        line = testLine;
-                    }
-                    if (wi === words.length - 1) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                    }
-                });
+                // Truncate with ellipsis if text exceeds max width
+                const charW = effectiveXFS * 0.55;
+                const maxChars = Math.max(1, Math.floor(xLabelMaxW / charW));
+                let displayText = fullText;
+                if (fullText.length > maxChars) {
+                    displayText = fullText.substring(0, Math.max(1, maxChars - 1)) + "\u2026";
+                }
+                textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(displayText);
             });
             if (xTitle) {
                 this.chartGroup.append("text").classed("axis-title", true)
