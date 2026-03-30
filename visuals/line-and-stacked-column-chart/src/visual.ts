@@ -320,20 +320,21 @@ export class Visual implements IVisual {
             }
         }
 
-        // Assemble margins — each edge accounts for its sections with explicit gaps
+        // Assemble margins — each element declares its full space requirement.
+        // The chart area (plotWidth × plotHeight) gets whatever remains.
         const PAD = 4; // base padding from visual edge
         const GAP = 6; // gap between adjacent sections
         const margin = { top: PAD, right: PAD, bottom: PAD, left: PAD };
 
-        // Bottom: x-axis labels + gap + legend (if bottom)
+        // Bottom: x-axis labels + legend (if bottom)
         margin.bottom += xAxisH;
         if (showLegend && legendPos === "bottom") {
             margin.bottom += GAP + legendH;
         }
 
-        // Top: legend (if top) — extra padding to avoid overlap with Power BI visual title
+        // Top: legend (if top)
         if (showLegend && legendPos === "top") {
-            margin.top += legendH + GAP + 4;
+            margin.top += legendH + GAP;
         }
 
         // Left: y-axis left + legend (if left)
@@ -530,6 +531,30 @@ export class Visual implements IVisual {
     ) {
         this.chartGroup.selectAll("*").remove();
         if (data.length === 0) return;
+
+        // Layout constants (must match update() margin calculation)
+        const PAD = 4;
+        const GAP = 6;
+        const legFS = this.formattingSettings.legendCard.fontSize.value;
+        const showLegend = this.formattingSettings.legendCard.show.value;
+        let legendH = 0, legendW = 0;
+        if (showLegend && series.length > 0) {
+            const legendPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
+            if (legendPos === "top" || legendPos === "bottom") {
+                const availLegW = Math.max(100, plotWidth);
+                const rowH = legFS + 10;
+                let rowX = 0, rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > availLegW && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
+                });
+                legendH = rows * rowH;
+            } else {
+                legendH = series.length * (legFS + 8);
+                const maxNameLen = Math.max(...series.map(s => s.name.length));
+                legendW = 14 + maxNameLen * legFS * 0.55 + 8;
+            }
+        }
 
         const tooltipDiv = this.tooltipDiv;
         const selectionManager = this.selectionManager;
@@ -932,47 +957,35 @@ export class Visual implements IVisual {
         }
 
         // ── Legend ──
-        // Legend is positioned within its reserved margin space, never overlapping the chart or axes.
+        // Each element is placed exactly in the space reserved for it by the margin calculation.
+        // chartGroup origin is at (margin.left, margin.top) in viewport coordinates.
         const showLeg = this.formattingSettings.legendCard.show.value;
         if (showLeg && series.length > 0) {
             const legFS = this.formattingSettings.legendCard.fontSize.value;
             const legFC = this.formattingSettings.legendCard.fontColor.value.value;
             const legPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
             const legG = this.chartGroup.append("g").classed("legend", true);
-            const legRowH = legFS + 10;
-
-            // Recalculate legend height for positioning (same logic as margin calc)
-            let legTotalH = legRowH;
-            if (legPos === "bottom" || legPos === "top") {
-                let rowX = 0;
-                let rows = 1;
-                series.forEach(s => {
-                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
-                    if (rowX + itemW > plotWidth && rowX > 0) {
-                        rows++;
-                        rowX = itemW;
-                    } else {
-                        rowX += itemW;
-                    }
-                });
-                legTotalH = rows * legRowH;
-            }
 
             if (legPos === "bottom") {
-                // Place legend at the very bottom of the margin: below x-axis area
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legTotalH})`);
+                // Legend sits below the chart + x-axis, at the bottom of the viewport.
+                // In chart coords: plotHeight puts us at the x-axis baseline,
+                // then skip past xAxisH + GAP to reach the legend area.
+                const xAxisH = margin.bottom - PAD - legendH - GAP;
+                legG.attr("transform", `translate(0,${plotHeight + xAxisH + GAP + legFS})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
-                // Place legend above the chart, within the top margin space
-                legG.attr("transform", `translate(0,${-margin.top + 8 + legRowH})`);
+                // Legend sits at the top of the viewport, above the chart.
+                // In chart coords: -margin.top reaches the viewport top edge,
+                // then PAD + legFS for the first text baseline.
+                legG.attr("transform", `translate(0,${-margin.top + PAD + legFS})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "left") {
-                legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
+                // Legend sits to the left of the chart, in the left margin.
+                legG.attr("transform", `translate(${-margin.left + PAD},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             } else if (legPos === "right") {
-                // Right of right y-axis
-                const rightAxisW = this.formattingSettings.yAxisCard.show.value ? yFS * 3.5 + 6 : 0;
-                legG.attr("transform", `translate(${plotWidth + rightAxisW + 8},${legFS})`);
+                // Legend sits to the right of the chart, in the right margin.
+                legG.attr("transform", `translate(${plotWidth + margin.right - legendW - PAD},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }
