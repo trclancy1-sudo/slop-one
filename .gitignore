@@ -4,3 +4,4 @@ dist/
 .tmp/
 *.statistics.*.html
 .DS_Store
+__pycache__/
