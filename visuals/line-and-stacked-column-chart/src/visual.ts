@@ -265,8 +265,21 @@ export class Visual implements IVisual {
         let legendH = 0, legendW = 0;
         if (showLegend && series.length > 0) {
             if (legendPos === "top" || legendPos === "bottom") {
-                // Single row: icon height + padding
-                legendH = legFS + 10;
+                // Estimate how many rows the legend needs based on available width
+                const availLegW = Math.max(100, width - 20);
+                const rowH = legFS + 10;
+                let rowX = 0;
+                let rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > availLegW && rowX > 0) {
+                        rows++;
+                        rowX = itemW;
+                    } else {
+                        rowX += itemW;
+                    }
+                });
+                legendH = rows * rowH;
             } else {
                 // Vertical: one row per series
                 legendH = series.length * (legFS + 8);
@@ -928,9 +941,26 @@ export class Visual implements IVisual {
             const legG = this.chartGroup.append("g").classed("legend", true);
             const legRowH = legFS + 10;
 
+            // Recalculate legend height for positioning (same logic as margin calc)
+            let legTotalH = legRowH;
+            if (legPos === "bottom" || legPos === "top") {
+                let rowX = 0;
+                let rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > plotWidth && rowX > 0) {
+                        rows++;
+                        rowX = itemW;
+                    } else {
+                        rowX += itemW;
+                    }
+                });
+                legTotalH = rows * legRowH;
+            }
+
             if (legPos === "bottom") {
                 // Place legend at the very bottom of the margin: below x-axis area
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legRowH})`);
+                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legTotalH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
                 // Place legend at the very top of the margin
@@ -951,9 +981,17 @@ export class Visual implements IVisual {
     private renderHLegend(g: d3.Selection<SVGGElement, unknown, null, undefined>,
         series: SeriesInfo[], fs: number, fc: string, maxWidth: number) {
         let xOff = 0;
+        let row = 0;
+        const rowH = fs + 10;
         series.forEach(s => {
-            if (xOff >= maxWidth) return; // no room for more items
-            const item = g.append("g").classed("legend-item", true).attr("transform", `translate(${xOff},0)`);
+            const estItemW = 16 + s.name.length * fs * 0.55 + 30;
+            // Wrap to next row if this item won't fit
+            if (xOff + estItemW > maxWidth && xOff > 0) {
+                row++;
+                xOff = 0;
+            }
+            const item = g.append("g").classed("legend-item", true)
+                .attr("transform", `translate(${xOff},${row * rowH})`);
             if (s.type === "column") {
                 item.append("rect").attr("width", 12).attr("height", 12).attr("y", -10).attr("fill", s.color);
             } else {
@@ -963,14 +1001,6 @@ export class Visual implements IVisual {
             const t = item.append("text").classed("legend-text", true).attr("x", 16).attr("y", 0)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
             const textW = (t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * fs * 0.55;
-            // Truncate text if it would overflow the available width
-            const availW = maxWidth - xOff - 16;
-            if (availW < textW && availW > 0) {
-                // Approximate truncation
-                const ratio = availW / textW;
-                const truncLen = Math.max(1, Math.floor(s.name.length * ratio) - 1);
-                t.text(s.name.substring(0, truncLen) + "\u2026");
-            }
             xOff += Math.min(textW, maxWidth - xOff) + 30;
         });
     }
