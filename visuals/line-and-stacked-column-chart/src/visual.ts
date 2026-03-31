@@ -1033,19 +1033,16 @@ export class Visual implements IVisual {
             }
 
             if (legPos === "bottom") {
-                // Position at bottom: below chart + x-axis, within the reserved legendH
-                legG.attr("transform", `translate(${-margin.left + 4},${plotHeight + margin.bottom - PAD - legTotalH + legFS})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 8);
+                legG.attr("transform", `translate(${-margin.left + PAD},${plotHeight + margin.bottom - PAD - legTotalH})`);
+                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 2 * PAD);
             } else if (legPos === "top") {
-                // Position at top: within the reserved legendH above the chart
-                legG.attr("transform", `translate(${-margin.left + 4},${-margin.top + PAD + legFS})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 8);
+                legG.attr("transform", `translate(${-margin.left + PAD},${-margin.top + PAD})`);
+                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 2 * PAD);
             } else if (legPos === "left") {
-                legG.attr("transform", `translate(${-margin.left + PAD},${legFS})`);
+                legG.attr("transform", `translate(${-margin.left + PAD},0)`);
                 this.renderVLegend(legG, series, legFS, legFC);
             } else if (legPos === "right") {
-                // Position at right: within the reserved legendW in the right margin
-                legG.attr("transform", `translate(${plotWidth + margin.right - PAD - legendW},${legFS})`);
+                legG.attr("transform", `translate(${plotWidth + margin.right - PAD - legendW},0)`);
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }
@@ -1065,15 +1062,15 @@ export class Visual implements IVisual {
             const item = g.append("g").classed("legend-item", true)
                 .attr("transform", `translate(${xOff},${row * rowH})`);
             if (s.type === "column") {
-                item.append("rect").attr("width", 12).attr("height", 12).attr("y", -10).attr("fill", s.color);
+                item.append("rect").attr("width", 10).attr("height", 10).attr("y", -1).attr("fill", s.color);
             } else {
-                item.append("line").attr("x1", 0).attr("x2", 12).attr("y1", -4).attr("y2", -4)
+                item.append("line").attr("x1", 0).attr("x2", 10).attr("y1", 4).attr("y2", 4)
                     .attr("stroke", s.color).attr("stroke-width", 2);
             }
-            const t = item.append("text").classed("legend-text", true).attr("x", 16).attr("y", 0)
+            const t = item.append("text").classed("legend-text", true).attr("x", 14).attr("y", fs * 0.8)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
             const textW = (t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * fs * 0.55;
-            xOff += textW + 30;
+            xOff += textW + 28;
         });
     }
 
@@ -1082,12 +1079,12 @@ export class Visual implements IVisual {
         series.forEach((s, i) => {
             const item = g.append("g").classed("legend-item", true).attr("transform", `translate(0,${i * (fs + 8)})`);
             if (s.type === "column") {
-                item.append("rect").attr("width", 10).attr("height", 10).attr("y", -8).attr("fill", s.color);
+                item.append("rect").attr("width", 10).attr("height", 10).attr("y", -1).attr("fill", s.color);
             } else {
-                item.append("line").attr("x1", 0).attr("x2", 10).attr("y1", -3).attr("y2", -3)
+                item.append("line").attr("x1", 0).attr("x2", 10).attr("y1", 4).attr("y2", 4)
                     .attr("stroke", s.color).attr("stroke-width", 2);
             }
-            item.append("text").classed("legend-text", true).attr("x", 14).attr("y", 0)
+            item.append("text").classed("legend-text", true).attr("x", 14).attr("y", fs * 0.8)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
         });
     }
