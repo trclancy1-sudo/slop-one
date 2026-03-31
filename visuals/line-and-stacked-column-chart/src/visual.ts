@@ -147,6 +147,7 @@ export class Visual implements IVisual {
     private xAxisMode: "single" | "wrapped" | "diagonal" = "single";
     private xLabelMaxH = 60;
     private xEffectiveFS = 11;
+    private legendW = 0;
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -287,6 +288,7 @@ export class Visual implements IVisual {
                 legendW = 14 + maxNameLen * legFS * 0.55 + 8;
             }
         }
+        this.legendW = legendW;
 
         // X-axis label height estimate
         // Cap label area to 20% of visual height — labels truncate to fit within this.
@@ -1009,7 +1011,8 @@ export class Visual implements IVisual {
         }
 
         // ── Legend ──
-        // Legend is positioned within its reserved margin space, never overlapping the chart or axes.
+        const PAD = 4;
+        const legendW = this.legendW;
         const showLeg = this.formattingSettings.legendCard.show.value;
         if (showLeg && series.length > 0) {
             const legFS = this.formattingSettings.legendCard.fontSize.value;
@@ -1030,18 +1033,19 @@ export class Visual implements IVisual {
             }
 
             if (legPos === "bottom") {
-                legG.attr("transform", `translate(${-margin.left + 4},${plotHeight + margin.bottom - legTotalH})`);
+                // Position at bottom: below chart + x-axis, within the reserved legendH
+                legG.attr("transform", `translate(${-margin.left + 4},${plotHeight + margin.bottom - PAD - legTotalH + legFS})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 8);
             } else if (legPos === "top") {
-                legG.attr("transform", `translate(${-margin.left + 4},${-margin.top + legRowH})`);
+                // Position at top: within the reserved legendH above the chart
+                legG.attr("transform", `translate(${-margin.left + 4},${-margin.top + PAD + legFS})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 8);
             } else if (legPos === "left") {
-                legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
+                legG.attr("transform", `translate(${-margin.left + PAD},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             } else if (legPos === "right") {
-                // Right of right y-axis
-                const rightAxisW = this.formattingSettings.yAxisCard.show.value ? yFS * 3.5 + 6 : 0;
-                legG.attr("transform", `translate(${plotWidth + rightAxisW + 8},${legFS})`);
+                // Position at right: within the reserved legendW in the right margin
+                legG.attr("transform", `translate(${plotWidth + margin.right - PAD - legendW},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }
