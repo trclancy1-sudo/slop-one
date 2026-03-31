@@ -149,6 +149,10 @@ export class Visual implements IVisual {
     private xEffectiveFS = 11;
     private legendW = 0;
 
+    // Element boundary positions (viewport coordinates, set in update, used in render)
+    // Legend region: the rectangle within the viewport where the legend must render
+    private legendBounds = { x: 0, y: 0, w: 0, h: 0 };
+
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
         this.selectionManager = this.host.createSelectionManager();
@@ -363,37 +367,58 @@ export class Visual implements IVisual {
             }
         }
 
-        // Assemble margins — each edge accounts for its sections with explicit gaps
-        const PAD = 4; // base padding from visual edge
-        const GAP = 6; // gap between adjacent sections
+        // Assemble margins — each element gets a dedicated region with gaps between.
+        // Layout order from edge inward: PAD | legend (if on this edge) | GAP | axis | plot
+        const PAD = 4;
+        const GAP = 4;
         const margin = { top: PAD, right: PAD, bottom: PAD, left: PAD };
 
-        // Bottom: x-axis labels + gap + legend (if bottom)
+        // Track legend region start (viewport Y for top/bottom, viewport X for left/right)
+        let legendRegionStart = 0;
+
+        // Bottom edge: [plot] -> [x-axis: xAxisH] -> [GAP] -> [legend: legendH] -> [PAD]
         margin.bottom += xAxisH;
         if (showLegend && legendPos === "bottom") {
-            margin.bottom += legendH;
+            margin.bottom += GAP + legendH;
+            // Legend starts at: height - PAD - legendH (viewport coords)
+            legendRegionStart = height - PAD - legendH;
         }
 
-        // Top: legend (if top)
+        // Top edge: [PAD] -> [legend: legendH] -> [GAP] -> [plot]
         if (showLegend && legendPos === "top") {
-            margin.top += legendH;
+            margin.top += legendH + GAP;
+            // Legend starts at: PAD (viewport coords)
+            legendRegionStart = PAD;
         }
 
-        // Left: y-axis left + legend (if left)
-        margin.left += yLeftW;
+        // Left edge: [PAD] -> [legend: legendW] -> [GAP] -> [y-axis] -> [plot]
         if (showLegend && legendPos === "left") {
             margin.left += legendW + GAP;
+            legendRegionStart = PAD;
         }
+        margin.left += yLeftW;
 
-        // Right: y-axis right + legend (if right)
-        margin.right += yRightW;
+        // Right edge: [plot] -> [y-axis] -> [GAP] -> [legend: legendW] -> [PAD]
         if (showLegend && legendPos === "right") {
             margin.right += legendW + GAP;
+            legendRegionStart = width - PAD - legendW;
         }
+        margin.right += yRightW;
 
         const plotWidth = width - margin.left - margin.right;
         const plotHeight = height - margin.top - margin.bottom;
         if (plotWidth <= 0 || plotHeight <= 0) return;
+
+        // Compute legend bounds in viewport coordinates
+        if (showLegend && series.length > 0) {
+            if (legendPos === "top" || legendPos === "bottom") {
+                this.legendBounds = { x: PAD, y: legendRegionStart, w: width - 2 * PAD, h: legendH };
+            } else if (legendPos === "left") {
+                this.legendBounds = { x: legendRegionStart, y: margin.top, w: legendW, h: plotHeight };
+            } else if (legendPos === "right") {
+                this.legendBounds = { x: legendRegionStart, y: margin.top, w: legendW, h: plotHeight };
+            }
+        }
 
         this.chartGroup.attr("transform", `translate(${margin.left},${margin.top})`);
 
@@ -1011,38 +1036,22 @@ export class Visual implements IVisual {
         }
 
         // ── Legend ──
-        const PAD = 4;
-        const legendW = this.legendW;
+        // Position legend exactly within its computed bounds (viewport coords -> chart coords)
         const showLeg = this.formattingSettings.legendCard.show.value;
         if (showLeg && series.length > 0) {
             const legFS = this.formattingSettings.legendCard.fontSize.value;
             const legFC = this.formattingSettings.legendCard.fontColor.value.value;
             const legPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
-            const legG = this.chartGroup.append("g").classed("legend", true);
-            const legRowH = legFS + 4;
+            const lb = this.legendBounds;
+            // Convert viewport coords to chart-group coords
+            const lx = lb.x - margin.left;
+            const ly = lb.y - margin.top;
+            const legG = this.chartGroup.append("g").classed("legend", true)
+                .attr("transform", `translate(${lx},${ly})`);
 
-            // Compute actual legend height for bottom positioning
-            let legTotalH = legRowH;
-            if (legPos === "bottom" || legPos === "top") {
-                let rowX = 0, rows = 1;
-                series.forEach(s => {
-                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
-                    if (rowX + itemW > plotWidth && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
-                });
-                legTotalH = rows * legRowH;
-            }
-
-            if (legPos === "bottom") {
-                legG.attr("transform", `translate(${-margin.left + PAD},${plotHeight + margin.bottom - PAD - legTotalH})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 2 * PAD);
-            } else if (legPos === "top") {
-                legG.attr("transform", `translate(${-margin.left + PAD},${-margin.top + PAD})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 2 * PAD);
-            } else if (legPos === "left") {
-                legG.attr("transform", `translate(${-margin.left + PAD},0)`);
-                this.renderVLegend(legG, series, legFS, legFC);
-            } else if (legPos === "right") {
-                legG.attr("transform", `translate(${plotWidth + margin.right - PAD - legendW},0)`);
+            if (legPos === "top" || legPos === "bottom") {
+                this.renderHLegend(legG, series, legFS, legFC, lb.w);
+            } else {
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }
