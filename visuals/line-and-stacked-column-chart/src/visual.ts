@@ -293,18 +293,26 @@ export class Visual implements IVisual {
         let xAxisH = 0;
         this.xAxisMode = "single";
         if (showXA) {
-            const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
             const charW = xFS * 0.55;
-            const estBandwidth = Math.max(20, (width - 40) / Math.max(data.length, 1) * 0.7);
-            const labelW = maxCatLen * charW;
             const lineH = xFS * 1.2;
             // How many wrapped lines fit within the capped height?
             const maxLines = Math.max(1, Math.floor(this.xLabelMaxH / lineH));
+            // Use a generous bandwidth estimate — wrapping handles the rest
+            const estBandwidth = Math.max(30, (width - 20) / Math.max(data.length, 1) * 0.7);
+            // Check the longest word (not full label) — wrapping breaks on spaces
+            const longestWord = Math.max(...data.map(d => {
+                const words = d.category.split(/\s+/);
+                return Math.max(...words.map(w => w.length));
+            }), 1);
+            const longestWordW = longestWord * charW;
+            const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
+            const labelW = maxCatLen * charW;
 
             if (labelW <= estBandwidth) {
                 this.xAxisMode = "single";
                 xAxisH = xFS + 2;
-            } else if (labelW <= estBandwidth * maxLines) {
+            } else if (longestWordW <= estBandwidth) {
+                // Words fit within bandwidth, so wrapping will work
                 this.xAxisMode = "wrapped";
                 const lines = Math.min(maxLines, Math.ceil(labelW / estBandwidth));
                 xAxisH = lines * lineH + 2;
