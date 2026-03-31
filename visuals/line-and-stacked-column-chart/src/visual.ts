@@ -283,17 +283,34 @@ export class Visual implements IVisual {
             }
         }
 
-        // X-axis label height: rotated at -35°, estimate from longest category label
+        // X-axis label height estimate
         let xAxisH = 0;
         if (showXA) {
             const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
             const charW = xFS * 0.55;
+            // Estimate bandwidth to decide horizontal vs diagonal
+            const estBandwidth = Math.max(20, (width - 40) / Math.max(data.length, 1) * 0.7);
             const labelW = maxCatLen * charW;
-            // Height contribution of rotated text: labelW * sin(35°) + fontSize * cos(35°)
-            xAxisH = labelW * Math.sin(35 * Math.PI / 180) + xFS * Math.cos(35 * Math.PI / 180);
-            xAxisH = Math.min(xAxisH, height * 0.3); // cap at 30% of visual height
-            xAxisH += 6; // tick mark + padding
-            if (xTitle) xAxisH += xFS + 6;
+
+            if (labelW <= estBandwidth) {
+                // Labels fit horizontally in one line
+                xAxisH = xFS + 4;
+            } else {
+                // Try wrapping: estimate lines needed
+                const maxLines = 2;
+                const wrapFits = labelW <= estBandwidth * maxLines;
+                if (wrapFits && data.length <= 20) {
+                    // Horizontal wrapped
+                    xAxisH = Math.min(maxLines, Math.ceil(labelW / estBandwidth)) * (xFS * 1.2) + 4;
+                } else {
+                    // Diagonal — truncated, so height is limited
+                    const truncW = Math.min(labelW, estBandwidth * 2);
+                    xAxisH = truncW * Math.sin(35 * Math.PI / 180) + xFS * Math.cos(35 * Math.PI / 180);
+                    xAxisH = Math.min(xAxisH, height * 0.25);
+                }
+            }
+            xAxisH += 2;
+            if (xTitle) xAxisH += xFS + 4;
         }
 
         // Y-axis tick label width estimate
@@ -570,26 +587,60 @@ export class Visual implements IVisual {
         const yRT = this.formattingSettings.yAxisCard.rightTitle.value;
 
         if (showXA) {
-            const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(xScale.bandwidth(), 60);
+            const bandwidth = xScale.bandwidth();
+            const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(bandwidth, 30);
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
-            // Power BI-style: cap font size (min 9px), then truncate with ellipsis
-            const minFontSize = 9;
-            const effectiveXFS = Math.max(minFontSize, Math.min(xFS, xLabelMaxW / 0.55 / 2));
+
+            const charW = xFS * 0.55;
+            const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
+            const longestLabelW = maxCatLen * charW;
+            // Decide: horizontal (with wrapping) vs diagonal (with truncation)
+            const useDiagonal = longestLabelW > xLabelMaxW * 2 || data.length > 20;
+
             xa.selectAll(".tick text").each(function () {
                 const textEl = d3.select(this);
                 const fullText = textEl.text();
-                textEl.text(null).style("font-size", `${effectiveXFS}px`).style("fill", xFC)
-                    .style("font-family", `"${xFF}", sans-serif`)
-                    .attr("transform", "rotate(-35)").style("text-anchor", "end");
+                textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
+                    .style("font-family", `"${xFF}", sans-serif`);
 
-                const charW = effectiveXFS * 0.55;
-                const maxChars = Math.max(1, Math.floor(xLabelMaxW / charW));
-                let displayText = fullText;
-                if (fullText.length > maxChars) {
-                    displayText = fullText.substring(0, Math.max(1, maxChars - 1)) + "\u2026";
+                if (useDiagonal) {
+                    // Diagonal + truncate
+                    textEl.attr("transform", "rotate(-35)").style("text-anchor", "end");
+                    const maxChars = Math.max(1, Math.floor(xLabelMaxW * 2 / charW));
+                    let displayText = fullText;
+                    if (fullText.length > maxChars) {
+                        displayText = fullText.substring(0, Math.max(1, maxChars - 1)) + "\u2026";
+                    }
+                    textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(displayText);
+                } else {
+                    // Horizontal with word wrapping
+                    textEl.style("text-anchor", "middle");
+                    const words = fullText.split(/\s+/);
+                    let line = "";
+                    let lineNum = 0;
+                    const lineHeight = xFS * 1.2;
+                    const maxW = xLabelMaxW;
+
+                    words.forEach((word, wi) => {
+                        const testLine = line ? line + " " + word : word;
+                        const estWidth = testLine.length * charW;
+                        if (estWidth > maxW && line) {
+                            textEl.append("tspan")
+                                .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                                .text(line);
+                            line = word;
+                            lineNum++;
+                        } else {
+                            line = testLine;
+                        }
+                        if (wi === words.length - 1) {
+                            textEl.append("tspan")
+                                .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                                .text(line);
+                        }
+                    });
                 }
-                textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(displayText);
             });
             if (xTitle) {
                 this.chartGroup.append("text").classed("axis-title", true)
