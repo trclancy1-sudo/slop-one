@@ -146,6 +146,7 @@ export class Visual implements IVisual {
     // X-axis layout state (set in update, used in render)
     private xAxisMode: "single" | "wrapped" | "diagonal" = "single";
     private xLabelMaxH = 60;
+    private xEffectiveFS = 11;
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -293,31 +294,54 @@ export class Visual implements IVisual {
         let xAxisH = 0;
         this.xAxisMode = "single";
         if (showXA) {
-            const charW = xFS * 0.55;
-            const lineH = xFS * 1.2;
-            // How many wrapped lines fit within the capped height?
-            const maxLines = Math.max(1, Math.floor(this.xLabelMaxH / lineH));
-            // Use a generous bandwidth estimate — wrapping handles the rest
+            const MIN_FONT = 9;
             const estBandwidth = Math.max(30, (width - 20) / Math.max(data.length, 1) * 0.7);
-            // Check the longest word (not full label) — wrapping breaks on spaces
+            const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
             const longestWord = Math.max(...data.map(d => {
                 const words = d.category.split(/\s+/);
                 return Math.max(...words.map(w => w.length));
             }), 1);
-            const longestWordW = longestWord * charW;
-            const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
-            const labelW = maxCatLen * charW;
+
+            // Try at user's font size first, then cap at 9px if needed
+            let effectiveFS = xFS;
+            let charW = effectiveFS * 0.55;
+            let labelW = maxCatLen * charW;
+            let longestWordW = longestWord * charW;
+            let lineH = effectiveFS * 1.2;
+            let maxLines = Math.max(1, Math.floor(this.xLabelMaxH / lineH));
 
             if (labelW <= estBandwidth) {
                 this.xAxisMode = "single";
-                xAxisH = xFS + 2;
             } else if (longestWordW <= estBandwidth) {
-                // Words fit within bandwidth, so wrapping will work
                 this.xAxisMode = "wrapped";
+            } else if (xFS > MIN_FONT) {
+                // Cap font size at 9px and retry
+                effectiveFS = MIN_FONT;
+                charW = effectiveFS * 0.55;
+                labelW = maxCatLen * charW;
+                longestWordW = longestWord * charW;
+                lineH = effectiveFS * 1.2;
+                maxLines = Math.max(1, Math.floor(this.xLabelMaxH / lineH));
+
+                if (labelW <= estBandwidth) {
+                    this.xAxisMode = "single";
+                } else if (longestWordW <= estBandwidth) {
+                    this.xAxisMode = "wrapped";
+                } else {
+                    this.xAxisMode = "diagonal";
+                }
+            } else {
+                this.xAxisMode = "diagonal";
+            }
+
+            this.xEffectiveFS = effectiveFS;
+
+            if (this.xAxisMode === "single") {
+                xAxisH = effectiveFS + 2;
+            } else if (this.xAxisMode === "wrapped") {
                 const lines = Math.min(maxLines, Math.ceil(labelW / estBandwidth));
                 xAxisH = lines * lineH + 2;
             } else {
-                this.xAxisMode = "diagonal";
                 xAxisH = this.xLabelMaxH;
             }
             xAxisH = Math.min(xAxisH, this.xLabelMaxH);
@@ -603,18 +627,18 @@ export class Visual implements IVisual {
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
 
-            const charW = xFS * 0.55;
+            const effFS = this.xEffectiveFS;
+            const charW = effFS * 0.55;
 
             // For diagonal: compute max label width from the reserved height
-            // height = labelW * sin(35) + fontSize * cos(35), solve for labelW
-            const diagMaxLabelW = (this.xLabelMaxH - xFS * Math.cos(35 * Math.PI / 180)) / Math.sin(35 * Math.PI / 180);
+            const diagMaxLabelW = (this.xLabelMaxH - effFS * Math.cos(35 * Math.PI / 180)) / Math.sin(35 * Math.PI / 180);
             const diagMaxChars = Math.max(1, Math.floor(Math.max(0, diagMaxLabelW) / charW));
             const xAxisMode = this.xAxisMode;
 
             xa.selectAll(".tick text").each(function () {
                 const textEl = d3.select(this);
                 const fullText = textEl.text();
-                textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
+                textEl.text(null).style("font-size", `${effFS}px`).style("fill", xFC)
                     .style("font-family", `"${xFF}", sans-serif`);
 
                 if (xAxisMode === "diagonal") {
@@ -633,7 +657,7 @@ export class Visual implements IVisual {
                         const words = fullText.split(/\s+/);
                         let line = "";
                         let lineNum = 0;
-                        const lineHeight = xFS * 1.2;
+                        const lineHeight = effFS * 1.2;
 
                         words.forEach((word, wi) => {
                             const testLine = line ? line + " " + word : word;
