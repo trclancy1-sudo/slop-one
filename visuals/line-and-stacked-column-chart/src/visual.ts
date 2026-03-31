@@ -265,8 +265,15 @@ export class Visual implements IVisual {
         let legendH = 0, legendW = 0;
         if (showLegend && series.length > 0) {
             if (legendPos === "top" || legendPos === "bottom") {
-                // Single row: icon height + padding
-                legendH = legFS + 10;
+                // Estimate rows needed based on available width
+                const availLegW = Math.max(100, width - 20);
+                const rowH = legFS + 10;
+                let rowX = 0, rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > availLegW && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
+                });
+                legendH = rows * rowH;
             } else {
                 // Vertical: one row per series
                 legendH = series.length * (legFS + 8);
