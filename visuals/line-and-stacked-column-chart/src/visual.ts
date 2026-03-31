@@ -297,14 +297,17 @@ export class Visual implements IVisual {
             const charW = xFS * 0.55;
             const estBandwidth = Math.max(20, (width - 40) / Math.max(data.length, 1) * 0.7);
             const labelW = maxCatLen * charW;
+            const lineH = xFS * 1.2;
+            // How many wrapped lines fit within the capped height?
+            const maxLines = Math.max(1, Math.floor(this.xLabelMaxH / lineH));
 
             if (labelW <= estBandwidth) {
                 this.xAxisMode = "single";
                 xAxisH = xFS + 2;
-            } else if (labelW <= estBandwidth * 2 && data.length <= 20) {
+            } else if (labelW <= estBandwidth * maxLines) {
                 this.xAxisMode = "wrapped";
-                const lines = Math.min(2, Math.ceil(labelW / estBandwidth));
-                xAxisH = lines * (xFS * 1.2) + 2;
+                const lines = Math.min(maxLines, Math.ceil(labelW / estBandwidth));
+                xAxisH = lines * lineH + 2;
             } else {
                 this.xAxisMode = "diagonal";
                 xAxisH = this.xLabelMaxH;
