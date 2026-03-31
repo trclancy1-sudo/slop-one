@@ -317,7 +317,7 @@ export class Visual implements IVisual {
         // Bottom: x-axis labels + gap + legend (if bottom)
         margin.bottom += xAxisH;
         if (showLegend && legendPos === "bottom") {
-            margin.bottom += GAP + legendH;
+            margin.bottom += GAP + 10 + legendH;
         }
 
         // Top: legend (if top) — include icon overhang (10px above baseline)
