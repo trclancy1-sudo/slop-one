@@ -929,9 +929,19 @@ export class Visual implements IVisual {
             const legG = this.chartGroup.append("g").classed("legend", true);
             const legRowH = legFS + 10;
 
+            // Compute actual legend height for bottom positioning
+            let legTotalH = legRowH;
+            if (legPos === "bottom" || legPos === "top") {
+                let rowX = 0, rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > plotWidth && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
+                });
+                legTotalH = rows * legRowH;
+            }
+
             if (legPos === "bottom") {
-                // Place legend at the very bottom of the margin: below x-axis area
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legRowH})`);
+                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legTotalH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
                 // Place legend at the very top of the margin
