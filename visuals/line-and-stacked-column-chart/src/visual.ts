@@ -941,12 +941,11 @@ export class Visual implements IVisual {
             }
 
             if (legPos === "bottom") {
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legTotalH})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth);
+                legG.attr("transform", `translate(${-margin.left + 4},${plotHeight + margin.bottom - legTotalH})`);
+                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 8);
             } else if (legPos === "top") {
-                // Place legend at the very top of the margin
-                legG.attr("transform", `translate(0,${-margin.top + legRowH})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth);
+                legG.attr("transform", `translate(${-margin.left + 4},${-margin.top + legRowH})`);
+                this.renderHLegend(legG, series, legFS, legFC, plotWidth + margin.left + margin.right - 8);
             } else if (legPos === "left") {
                 legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
                 this.renderVLegend(legG, series, legFS, legFC);
