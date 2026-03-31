@@ -317,12 +317,12 @@ export class Visual implements IVisual {
         // Bottom: x-axis labels + gap + legend (if bottom)
         margin.bottom += xAxisH;
         if (showLegend && legendPos === "bottom") {
-            margin.bottom += GAP + legendH;
+            margin.bottom += legendH;
         }
 
         // Top: legend (if top)
         if (showLegend && legendPos === "top") {
-            margin.top += legendH + GAP;
+            margin.top += legendH;
         }
 
         // Left: y-axis left + legend (if left)
