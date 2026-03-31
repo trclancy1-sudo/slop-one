@@ -267,7 +267,7 @@ export class Visual implements IVisual {
             if (legendPos === "top" || legendPos === "bottom") {
                 // Estimate rows needed based on available width
                 const availLegW = Math.max(100, width - 20);
-                const rowH = legFS + 10;
+                const rowH = legFS + 4;
                 let rowX = 0, rows = 1;
                 series.forEach(s => {
                     const itemW = 16 + s.name.length * legFS * 0.55 + 30;
@@ -927,7 +927,7 @@ export class Visual implements IVisual {
             const legFC = this.formattingSettings.legendCard.fontColor.value.value;
             const legPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
             const legG = this.chartGroup.append("g").classed("legend", true);
-            const legRowH = legFS + 10;
+            const legRowH = legFS + 4;
 
             // Compute actual legend height for bottom positioning
             let legTotalH = legRowH;
@@ -962,7 +962,7 @@ export class Visual implements IVisual {
         series: SeriesInfo[], fs: number, fc: string, maxWidth: number) {
         let xOff = 0;
         let row = 0;
-        const rowH = fs + 10;
+        const rowH = fs + 4;
         series.forEach(s => {
             const estItemW = 16 + s.name.length * fs * 0.55 + 30;
             if (xOff + estItemW > maxWidth && xOff > 0) {
