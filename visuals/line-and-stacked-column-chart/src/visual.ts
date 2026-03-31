@@ -143,6 +143,10 @@ export class Visual implements IVisual {
     private previousValueKey = "";
     private previousHighlightKey = "";
 
+    // X-axis layout state (set in update, used in render)
+    private xAxisMode: "single" | "wrapped" | "diagonal" = "single";
+    private xLabelMaxH = 60;
+
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
         this.selectionManager = this.host.createSelectionManager();
@@ -284,32 +288,28 @@ export class Visual implements IVisual {
         }
 
         // X-axis label height estimate
+        // Cap label area to 20% of visual height — labels truncate to fit within this.
+        this.xLabelMaxH = Math.floor(height * 0.2);
         let xAxisH = 0;
+        this.xAxisMode = "single";
         if (showXA) {
             const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
             const charW = xFS * 0.55;
-            // Estimate bandwidth to decide horizontal vs diagonal
             const estBandwidth = Math.max(20, (width - 40) / Math.max(data.length, 1) * 0.7);
             const labelW = maxCatLen * charW;
 
             if (labelW <= estBandwidth) {
-                // Labels fit horizontally in one line
-                xAxisH = xFS + 4;
+                this.xAxisMode = "single";
+                xAxisH = xFS + 2;
+            } else if (labelW <= estBandwidth * 2 && data.length <= 20) {
+                this.xAxisMode = "wrapped";
+                const lines = Math.min(2, Math.ceil(labelW / estBandwidth));
+                xAxisH = lines * (xFS * 1.2) + 2;
             } else {
-                // Try wrapping: estimate lines needed
-                const maxLines = 2;
-                const wrapFits = labelW <= estBandwidth * maxLines;
-                if (wrapFits && data.length <= 20) {
-                    // Horizontal wrapped
-                    xAxisH = Math.min(maxLines, Math.ceil(labelW / estBandwidth)) * (xFS * 1.2) + 4;
-                } else {
-                    // Diagonal — truncated, so height is limited
-                    const truncW = Math.min(labelW, estBandwidth * 2);
-                    xAxisH = truncW * Math.sin(35 * Math.PI / 180) + xFS * Math.cos(35 * Math.PI / 180);
-                    xAxisH = Math.min(xAxisH, height * 0.25);
-                }
+                this.xAxisMode = "diagonal";
+                xAxisH = this.xLabelMaxH;
             }
-            xAxisH += 2;
+            xAxisH = Math.min(xAxisH, this.xLabelMaxH);
             if (xTitle) xAxisH += xFS + 4;
         }
 
@@ -593,10 +593,12 @@ export class Visual implements IVisual {
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
 
             const charW = xFS * 0.55;
-            const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
-            const longestLabelW = maxCatLen * charW;
-            // Decide: horizontal (with wrapping) vs diagonal (with truncation)
-            const useDiagonal = longestLabelW > xLabelMaxW * 2 || data.length > 20;
+
+            // For diagonal: compute max label width from the reserved height
+            // height = labelW * sin(35) + fontSize * cos(35), solve for labelW
+            const diagMaxLabelW = (this.xLabelMaxH - xFS * Math.cos(35 * Math.PI / 180)) / Math.sin(35 * Math.PI / 180);
+            const diagMaxChars = Math.max(1, Math.floor(Math.max(0, diagMaxLabelW) / charW));
+            const xAxisMode = this.xAxisMode;
 
             xa.selectAll(".tick text").each(function () {
                 const textEl = d3.select(this);
@@ -604,42 +606,43 @@ export class Visual implements IVisual {
                 textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
                     .style("font-family", `"${xFF}", sans-serif`);
 
-                if (useDiagonal) {
-                    // Diagonal + truncate
+                if (xAxisMode === "diagonal") {
                     textEl.attr("transform", "rotate(-35)").style("text-anchor", "end");
-                    const maxChars = Math.max(1, Math.floor(xLabelMaxW * 2 / charW));
                     let displayText = fullText;
-                    if (fullText.length > maxChars) {
-                        displayText = fullText.substring(0, Math.max(1, maxChars - 1)) + "\u2026";
+                    if (fullText.length > diagMaxChars) {
+                        displayText = fullText.substring(0, Math.max(1, diagMaxChars - 1)) + "\u2026";
                     }
                     textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(displayText);
                 } else {
-                    // Horizontal with word wrapping
+                    // Horizontal — single line or word-wrapped
                     textEl.style("text-anchor", "middle");
-                    const words = fullText.split(/\s+/);
-                    let line = "";
-                    let lineNum = 0;
-                    const lineHeight = xFS * 1.2;
-                    const maxW = xLabelMaxW;
+                    if (xAxisMode === "single") {
+                        textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(fullText);
+                    } else {
+                        const words = fullText.split(/\s+/);
+                        let line = "";
+                        let lineNum = 0;
+                        const lineHeight = xFS * 1.2;
 
-                    words.forEach((word, wi) => {
-                        const testLine = line ? line + " " + word : word;
-                        const estWidth = testLine.length * charW;
-                        if (estWidth > maxW && line) {
-                            textEl.append("tspan")
-                                .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                                .text(line);
-                            line = word;
-                            lineNum++;
-                        } else {
-                            line = testLine;
-                        }
-                        if (wi === words.length - 1) {
-                            textEl.append("tspan")
-                                .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                                .text(line);
-                        }
-                    });
+                        words.forEach((word, wi) => {
+                            const testLine = line ? line + " " + word : word;
+                            const estWidth = testLine.length * charW;
+                            if (estWidth > xLabelMaxW && line) {
+                                textEl.append("tspan")
+                                    .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                                    .text(line);
+                                line = word;
+                                lineNum++;
+                            } else {
+                                line = testLine;
+                            }
+                            if (wi === words.length - 1) {
+                                textEl.append("tspan")
+                                    .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                                    .text(line);
+                            }
+                        });
+                    }
                 }
             });
             if (xTitle) {
