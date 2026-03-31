@@ -952,9 +952,16 @@ export class Visual implements IVisual {
     private renderHLegend(g: d3.Selection<SVGGElement, unknown, null, undefined>,
         series: SeriesInfo[], fs: number, fc: string, maxWidth: number) {
         let xOff = 0;
+        let row = 0;
+        const rowH = fs + 10;
         series.forEach(s => {
-            if (xOff >= maxWidth) return; // no room for more items
-            const item = g.append("g").classed("legend-item", true).attr("transform", `translate(${xOff},0)`);
+            const estItemW = 16 + s.name.length * fs * 0.55 + 30;
+            if (xOff + estItemW > maxWidth && xOff > 0) {
+                row++;
+                xOff = 0;
+            }
+            const item = g.append("g").classed("legend-item", true)
+                .attr("transform", `translate(${xOff},${row * rowH})`);
             if (s.type === "column") {
                 item.append("rect").attr("width", 12).attr("height", 12).attr("y", -10).attr("fill", s.color);
             } else {
@@ -964,15 +971,7 @@ export class Visual implements IVisual {
             const t = item.append("text").classed("legend-text", true).attr("x", 16).attr("y", 0)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
             const textW = (t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * fs * 0.55;
-            // Truncate text if it would overflow the available width
-            const availW = maxWidth - xOff - 16;
-            if (availW < textW && availW > 0) {
-                // Approximate truncation
-                const ratio = availW / textW;
-                const truncLen = Math.max(1, Math.floor(s.name.length * ratio) - 1);
-                t.text(s.name.substring(0, truncLen) + "\u2026");
-            }
-            xOff += Math.min(textW, maxWidth - xOff) + 30;
+            xOff += textW + 30;
         });
     }
 
