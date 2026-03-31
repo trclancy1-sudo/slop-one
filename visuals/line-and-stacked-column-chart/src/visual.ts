@@ -265,8 +265,15 @@ export class Visual implements IVisual {
         let legendH = 0, legendW = 0;
         if (showLegend && series.length > 0) {
             if (legendPos === "top" || legendPos === "bottom") {
-                // Single row: icon height + padding
-                legendH = legFS + 10;
+                // Estimate rows needed based on available width
+                const availLegW = Math.max(100, width - 20);
+                const rowH = legFS + 10;
+                let rowX = 0, rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > availLegW && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
+                });
+                legendH = rows * rowH;
             } else {
                 // Vertical: one row per series
                 legendH = series.length * (legFS + 8);
@@ -307,15 +314,15 @@ export class Visual implements IVisual {
         const GAP = 6; // gap between adjacent sections
         const margin = { top: PAD, right: PAD, bottom: PAD, left: PAD };
 
-        // Bottom: x-axis labels + gap + legend (if bottom)
+        // Bottom: x-axis labels + gap + legend (if bottom, include icon overhang)
         margin.bottom += xAxisH;
         if (showLegend && legendPos === "bottom") {
-            margin.bottom += GAP + legendH;
+            margin.bottom += GAP + 10 + legendH;
         }
 
-        // Top: legend (if top)
+        // Top: legend (if top) — include icon overhang (10px above baseline)
         if (showLegend && legendPos === "top") {
-            margin.top += legendH + GAP;
+            margin.top += 10 + legendH + GAP;
         }
 
         // Left: y-axis left + legend (if left)
@@ -566,39 +573,23 @@ export class Visual implements IVisual {
             const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(xScale.bandwidth(), 60);
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
-            // Replace default tick text with wrapped text
+            // Power BI-style: cap font size (min 9px), then truncate with ellipsis
+            const minFontSize = 9;
+            const effectiveXFS = Math.max(minFontSize, Math.min(xFS, xLabelMaxW / 0.55 / 2));
             xa.selectAll(".tick text").each(function () {
                 const textEl = d3.select(this);
                 const fullText = textEl.text();
-                textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
+                textEl.text(null).style("font-size", `${effectiveXFS}px`).style("fill", xFC)
                     .style("font-family", `"${xFF}", sans-serif`)
                     .attr("transform", "rotate(-35)").style("text-anchor", "end");
 
-                // Split into words and wrap
-                const words = fullText.split(/\s+/);
-                let line = "";
-                let lineNum = 0;
-                const lineHeight = xFS * 1.2;
-
-                words.forEach((word, wi) => {
-                    const testLine = line ? line + " " + word : word;
-                    // Estimate width: ~0.6em per char at given font size
-                    const estWidth = testLine.length * xFS * 0.55;
-                    if (estWidth > xLabelMaxW && line) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                        line = word;
-                        lineNum++;
-                    } else {
-                        line = testLine;
-                    }
-                    if (wi === words.length - 1) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                    }
-                });
+                const charW = effectiveXFS * 0.55;
+                const maxChars = Math.max(1, Math.floor(xLabelMaxW / charW));
+                let displayText = fullText;
+                if (fullText.length > maxChars) {
+                    displayText = fullText.substring(0, Math.max(1, maxChars - 1)) + "\u2026";
+                }
+                textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(displayText);
             });
             if (xTitle) {
                 this.chartGroup.append("text").classed("axis-title", true)
@@ -938,12 +929,21 @@ export class Visual implements IVisual {
             const legG = this.chartGroup.append("g").classed("legend", true);
             const legRowH = legFS + 10;
 
+            // Compute actual legend height for positioning
+            let legTotalH = legRowH;
+            if (legPos === "bottom" || legPos === "top") {
+                let rowX = 0, rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > plotWidth && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
+                });
+                legTotalH = rows * legRowH;
+            }
+
             if (legPos === "bottom") {
-                // Place legend at the very bottom of the margin: below x-axis area
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legRowH})`);
+                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legTotalH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "top") {
-                // Place legend at the very top of the margin
                 legG.attr("transform", `translate(0,${-margin.top + legRowH})`);
                 this.renderHLegend(legG, series, legFS, legFC, plotWidth);
             } else if (legPos === "left") {
@@ -961,9 +961,16 @@ export class Visual implements IVisual {
     private renderHLegend(g: d3.Selection<SVGGElement, unknown, null, undefined>,
         series: SeriesInfo[], fs: number, fc: string, maxWidth: number) {
         let xOff = 0;
+        let row = 0;
+        const rowH = fs + 10;
         series.forEach(s => {
-            if (xOff >= maxWidth) return; // no room for more items
-            const item = g.append("g").classed("legend-item", true).attr("transform", `translate(${xOff},0)`);
+            const estItemW = 16 + s.name.length * fs * 0.55 + 30;
+            if (xOff + estItemW > maxWidth && xOff > 0) {
+                row++;
+                xOff = 0;
+            }
+            const item = g.append("g").classed("legend-item", true)
+                .attr("transform", `translate(${xOff},${row * rowH})`);
             if (s.type === "column") {
                 item.append("rect").attr("width", 12).attr("height", 12).attr("y", -10).attr("fill", s.color);
             } else {
@@ -973,15 +980,7 @@ export class Visual implements IVisual {
             const t = item.append("text").classed("legend-text", true).attr("x", 16).attr("y", 0)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
             const textW = (t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * fs * 0.55;
-            // Truncate text if it would overflow the available width
-            const availW = maxWidth - xOff - 16;
-            if (availW < textW && availW > 0) {
-                // Approximate truncation
-                const ratio = availW / textW;
-                const truncLen = Math.max(1, Math.floor(s.name.length * ratio) - 1);
-                t.text(s.name.substring(0, truncLen) + "\u2026");
-            }
-            xOff += Math.min(textW, maxWidth - xOff) + 30;
+            xOff += textW + 30;
         });
     }
 
