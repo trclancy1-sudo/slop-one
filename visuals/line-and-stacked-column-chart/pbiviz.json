@@ -4,7 +4,7 @@
         "displayName": "Line and Stacked Column Chart",
         "guid": "lineAndStackedColumnChartA1FE89285C7D48799E982BCD5E6EB1FD",
         "visualClassName": "Visual",
-        "version": "1.1.0.0",
+        "version": "1.0.0.0",
         "description": "A combined line and stacked column chart for Power BI",
         "supportUrl": "https://github.com/trclancy1-sudo/slop-one",
         "gitHubUrl": "https://github.com/trclancy1-sudo/slop-one"
@@ -22,5 +22,5 @@
     "capabilities": "capabilities.json",
     "dependencies": null,
     "stringResources": [],
-    "version": "1.1.0.0"
+    "version": "1.0.0.0"
 }
