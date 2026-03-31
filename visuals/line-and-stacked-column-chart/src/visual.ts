@@ -566,39 +566,23 @@ export class Visual implements IVisual {
             const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(xScale.bandwidth(), 60);
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
-            // Replace default tick text with wrapped text
+            // Power BI-style: cap font size (min 9px), then truncate with ellipsis
+            const minFontSize = 9;
+            const effectiveXFS = Math.max(minFontSize, Math.min(xFS, xLabelMaxW / 0.55 / 2));
             xa.selectAll(".tick text").each(function () {
                 const textEl = d3.select(this);
                 const fullText = textEl.text();
-                textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
+                textEl.text(null).style("font-size", `${effectiveXFS}px`).style("fill", xFC)
                     .style("font-family", `"${xFF}", sans-serif`)
                     .attr("transform", "rotate(-35)").style("text-anchor", "end");
 
-                // Split into words and wrap
-                const words = fullText.split(/\s+/);
-                let line = "";
-                let lineNum = 0;
-                const lineHeight = xFS * 1.2;
-
-                words.forEach((word, wi) => {
-                    const testLine = line ? line + " " + word : word;
-                    // Estimate width: ~0.6em per char at given font size
-                    const estWidth = testLine.length * xFS * 0.55;
-                    if (estWidth > xLabelMaxW && line) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                        line = word;
-                        lineNum++;
-                    } else {
-                        line = testLine;
-                    }
-                    if (wi === words.length - 1) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                    }
-                });
+                const charW = effectiveXFS * 0.55;
+                const maxChars = Math.max(1, Math.floor(xLabelMaxW / charW));
+                let displayText = fullText;
+                if (fullText.length > maxChars) {
+                    displayText = fullText.substring(0, Math.max(1, maxChars - 1)) + "\u2026";
+                }
+                textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(displayText);
             });
             if (xTitle) {
                 this.chartGroup.append("text").classed("axis-title", true)
