@@ -143,6 +143,16 @@ export class Visual implements IVisual {
     private previousValueKey = "";
     private previousHighlightKey = "";
 
+    // X-axis layout state (set in update, used in render)
+    private xAxisMode: "single" | "wrapped" | "diagonal" = "single";
+    private xLabelMaxH = 60;
+    private xEffectiveFS = 11;
+    private legendW = 0;
+
+    // Element boundary positions (viewport coordinates, set in update, used in render)
+    // Legend region: the rectangle within the viewport where the legend must render
+    private legendBounds = { x: 0, y: 0, w: 0, h: 0 };
+
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
         this.selectionManager = this.host.createSelectionManager();
@@ -265,8 +275,15 @@ export class Visual implements IVisual {
         let legendH = 0, legendW = 0;
         if (showLegend && series.length > 0) {
             if (legendPos === "top" || legendPos === "bottom") {
-                // Single row: icon height + padding
-                legendH = legFS + 10;
+                // Estimate rows needed based on available width
+                const availLegW = Math.max(100, width - 20);
+                const rowH = legFS + 4;
+                let rowX = 0, rows = 1;
+                series.forEach(s => {
+                    const itemW = 16 + s.name.length * legFS * 0.55 + 30;
+                    if (rowX + itemW > availLegW && rowX > 0) { rows++; rowX = itemW; } else { rowX += itemW; }
+                });
+                legendH = rows * rowH;
             } else {
                 // Vertical: one row per series
                 legendH = series.length * (legFS + 8);
@@ -275,18 +292,66 @@ export class Visual implements IVisual {
                 legendW = 14 + maxNameLen * legFS * 0.55 + 8;
             }
         }
+        this.legendW = legendW;
 
-        // X-axis label height: rotated at -35°, estimate from longest category label
+        // X-axis label height estimate
+        // Cap label area to 20% of visual height — labels truncate to fit within this.
+        this.xLabelMaxH = Math.floor(height * 0.2);
         let xAxisH = 0;
+        this.xAxisMode = "single";
         if (showXA) {
+            const MIN_FONT = 9;
+            const estBandwidth = Math.max(30, (width - 20) / Math.max(data.length, 1) * 0.7);
             const maxCatLen = Math.max(...data.map(d => d.category.length), 1);
-            const charW = xFS * 0.55;
-            const labelW = maxCatLen * charW;
-            // Height contribution of rotated text: labelW * sin(35°) + fontSize * cos(35°)
-            xAxisH = labelW * Math.sin(35 * Math.PI / 180) + xFS * Math.cos(35 * Math.PI / 180);
-            xAxisH = Math.min(xAxisH, height * 0.3); // cap at 30% of visual height
-            xAxisH += 6; // tick mark + padding
-            if (xTitle) xAxisH += xFS + 6;
+            const longestWord = Math.max(...data.map(d => {
+                const words = d.category.split(/\s+/);
+                return Math.max(...words.map(w => w.length));
+            }), 1);
+
+            // Try at user's font size first, then cap at 9px if needed
+            let effectiveFS = xFS;
+            let charW = effectiveFS * 0.55;
+            let labelW = maxCatLen * charW;
+            let longestWordW = longestWord * charW;
+            let lineH = effectiveFS * 1.2;
+            let maxLines = Math.max(1, Math.floor(this.xLabelMaxH / lineH));
+
+            if (labelW <= estBandwidth) {
+                this.xAxisMode = "single";
+            } else if (longestWordW <= estBandwidth) {
+                this.xAxisMode = "wrapped";
+            } else if (xFS > MIN_FONT) {
+                // Cap font size at 9px and retry
+                effectiveFS = MIN_FONT;
+                charW = effectiveFS * 0.55;
+                labelW = maxCatLen * charW;
+                longestWordW = longestWord * charW;
+                lineH = effectiveFS * 1.2;
+                maxLines = Math.max(1, Math.floor(this.xLabelMaxH / lineH));
+
+                if (labelW <= estBandwidth) {
+                    this.xAxisMode = "single";
+                } else if (longestWordW <= estBandwidth) {
+                    this.xAxisMode = "wrapped";
+                } else {
+                    this.xAxisMode = "diagonal";
+                }
+            } else {
+                this.xAxisMode = "diagonal";
+            }
+
+            this.xEffectiveFS = effectiveFS;
+
+            if (this.xAxisMode === "single") {
+                xAxisH = effectiveFS + 2;
+            } else if (this.xAxisMode === "wrapped") {
+                const lines = Math.min(maxLines, Math.ceil(labelW / estBandwidth));
+                xAxisH = lines * lineH + 2;
+            } else {
+                xAxisH = this.xLabelMaxH;
+            }
+            xAxisH = Math.min(xAxisH, this.xLabelMaxH);
+            if (xTitle) xAxisH += xFS + 4;
         }
 
         // Y-axis tick label width estimate
@@ -302,37 +367,58 @@ export class Visual implements IVisual {
             }
         }
 
-        // Assemble margins — each edge accounts for its sections with explicit gaps
-        const PAD = 4; // base padding from visual edge
-        const GAP = 6; // gap between adjacent sections
+        // Assemble margins — each element gets a dedicated region with gaps between.
+        // Layout order from edge inward: PAD | legend (if on this edge) | GAP | axis | plot
+        const PAD = 4;
+        const GAP = 4;
         const margin = { top: PAD, right: PAD, bottom: PAD, left: PAD };
 
-        // Bottom: x-axis labels + gap + legend (if bottom)
+        // Track legend region start (viewport Y for top/bottom, viewport X for left/right)
+        let legendRegionStart = 0;
+
+        // Bottom edge: [plot] -> [x-axis: xAxisH] -> [GAP] -> [legend: legendH] -> [PAD]
         margin.bottom += xAxisH;
         if (showLegend && legendPos === "bottom") {
             margin.bottom += GAP + legendH;
+            // Legend starts at: height - PAD - legendH (viewport coords)
+            legendRegionStart = height - PAD - legendH;
         }
 
-        // Top: legend (if top)
+        // Top edge: [PAD] -> [legend: legendH] -> [GAP] -> [plot]
         if (showLegend && legendPos === "top") {
             margin.top += legendH + GAP;
+            // Legend starts at: PAD (viewport coords)
+            legendRegionStart = PAD;
         }
 
-        // Left: y-axis left + legend (if left)
-        margin.left += yLeftW;
+        // Left edge: [PAD] -> [legend: legendW] -> [GAP] -> [y-axis] -> [plot]
         if (showLegend && legendPos === "left") {
             margin.left += legendW + GAP;
+            legendRegionStart = PAD;
         }
+        margin.left += yLeftW;
 
-        // Right: y-axis right + legend (if right)
-        margin.right += yRightW;
+        // Right edge: [plot] -> [y-axis] -> [GAP] -> [legend: legendW] -> [PAD]
         if (showLegend && legendPos === "right") {
             margin.right += legendW + GAP;
+            legendRegionStart = width - PAD - legendW;
         }
+        margin.right += yRightW;
 
         const plotWidth = width - margin.left - margin.right;
         const plotHeight = height - margin.top - margin.bottom;
         if (plotWidth <= 0 || plotHeight <= 0) return;
+
+        // Compute legend bounds in viewport coordinates
+        if (showLegend && series.length > 0) {
+            if (legendPos === "top" || legendPos === "bottom") {
+                this.legendBounds = { x: PAD, y: legendRegionStart, w: width - 2 * PAD, h: legendH };
+            } else if (legendPos === "left") {
+                this.legendBounds = { x: legendRegionStart, y: margin.top, w: legendW, h: plotHeight };
+            } else if (legendPos === "right") {
+                this.legendBounds = { x: legendRegionStart, y: margin.top, w: legendW, h: plotHeight };
+            }
+        }
 
         this.chartGroup.attr("transform", `translate(${margin.left},${margin.top})`);
 
@@ -563,42 +649,63 @@ export class Visual implements IVisual {
         const yRT = this.formattingSettings.yAxisCard.rightTitle.value;
 
         if (showXA) {
-            const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(xScale.bandwidth(), 60);
+            const bandwidth = xScale.bandwidth();
+            const xLabelMaxW = this.formattingSettings.xAxisCard.maxWidth.value || Math.max(bandwidth, 30);
             const xa = this.chartGroup.append("g").classed("axis x-axis", true)
                 .attr("transform", `translate(0,${plotHeight})`).call(d3.axisBottom(xScale));
-            // Replace default tick text with wrapped text
+
+            const effFS = this.xEffectiveFS;
+            const charW = effFS * 0.55;
+
+            // For diagonal: compute max label width from the reserved height
+            const diagMaxLabelW = (this.xLabelMaxH - effFS * Math.cos(35 * Math.PI / 180)) / Math.sin(35 * Math.PI / 180);
+            const diagMaxChars = Math.max(1, Math.floor(Math.max(0, diagMaxLabelW) / charW));
+            const xAxisMode = this.xAxisMode;
+
             xa.selectAll(".tick text").each(function () {
                 const textEl = d3.select(this);
                 const fullText = textEl.text();
-                textEl.text(null).style("font-size", `${xFS}px`).style("fill", xFC)
-                    .style("font-family", `"${xFF}", sans-serif`)
-                    .attr("transform", "rotate(-35)").style("text-anchor", "end");
+                textEl.text(null).style("font-size", `${effFS}px`).style("fill", xFC)
+                    .style("font-family", `"${xFF}", sans-serif`);
 
-                // Split into words and wrap
-                const words = fullText.split(/\s+/);
-                let line = "";
-                let lineNum = 0;
-                const lineHeight = xFS * 1.2;
-
-                words.forEach((word, wi) => {
-                    const testLine = line ? line + " " + word : word;
-                    // Estimate width: ~0.6em per char at given font size
-                    const estWidth = testLine.length * xFS * 0.55;
-                    if (estWidth > xLabelMaxW && line) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                        line = word;
-                        lineNum++;
+                if (xAxisMode === "diagonal") {
+                    textEl.attr("transform", "rotate(-35)").style("text-anchor", "end");
+                    let displayText = fullText;
+                    if (fullText.length > diagMaxChars) {
+                        displayText = fullText.substring(0, Math.max(1, diagMaxChars - 1)) + "\u2026";
+                    }
+                    textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(displayText);
+                } else {
+                    // Horizontal — single line or word-wrapped
+                    textEl.style("text-anchor", "middle");
+                    if (xAxisMode === "single") {
+                        textEl.append("tspan").attr("x", 0).attr("dy", "0.71em").text(fullText);
                     } else {
-                        line = testLine;
+                        const words = fullText.split(/\s+/);
+                        let line = "";
+                        let lineNum = 0;
+                        const lineHeight = effFS * 1.2;
+
+                        words.forEach((word, wi) => {
+                            const testLine = line ? line + " " + word : word;
+                            const estWidth = testLine.length * charW;
+                            if (estWidth > xLabelMaxW && line) {
+                                textEl.append("tspan")
+                                    .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                                    .text(line);
+                                line = word;
+                                lineNum++;
+                            } else {
+                                line = testLine;
+                            }
+                            if (wi === words.length - 1) {
+                                textEl.append("tspan")
+                                    .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
+                                    .text(line);
+                            }
+                        });
                     }
-                    if (wi === words.length - 1) {
-                        textEl.append("tspan")
-                            .attr("x", 0).attr("dy", lineNum === 0 ? "0.71em" : `${lineHeight}px`)
-                            .text(line);
-                    }
-                });
+                }
             });
             if (xTitle) {
                 this.chartGroup.append("text").classed("axis-title", true)
@@ -929,30 +1036,22 @@ export class Visual implements IVisual {
         }
 
         // ── Legend ──
-        // Legend is positioned within its reserved margin space, never overlapping the chart or axes.
+        // Position legend exactly within its computed bounds (viewport coords -> chart coords)
         const showLeg = this.formattingSettings.legendCard.show.value;
         if (showLeg && series.length > 0) {
             const legFS = this.formattingSettings.legendCard.fontSize.value;
             const legFC = this.formattingSettings.legendCard.fontColor.value.value;
             const legPos = this.formattingSettings.legendCard.position.value?.value || "bottom";
-            const legG = this.chartGroup.append("g").classed("legend", true);
-            const legRowH = legFS + 10;
+            const lb = this.legendBounds;
+            // Convert viewport coords to chart-group coords
+            const lx = lb.x - margin.left;
+            const ly = lb.y - margin.top;
+            const legG = this.chartGroup.append("g").classed("legend", true)
+                .attr("transform", `translate(${lx},${ly})`);
 
-            if (legPos === "bottom") {
-                // Place legend at the very bottom of the margin: below x-axis area
-                legG.attr("transform", `translate(0,${plotHeight + margin.bottom - legRowH})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth);
-            } else if (legPos === "top") {
-                // Place legend at the very top of the margin
-                legG.attr("transform", `translate(0,${-margin.top + legRowH})`);
-                this.renderHLegend(legG, series, legFS, legFC, plotWidth);
-            } else if (legPos === "left") {
-                legG.attr("transform", `translate(${-margin.left + 4},${legFS})`);
-                this.renderVLegend(legG, series, legFS, legFC);
-            } else if (legPos === "right") {
-                // Right of right y-axis
-                const rightAxisW = this.formattingSettings.yAxisCard.show.value ? yFS * 3.5 + 6 : 0;
-                legG.attr("transform", `translate(${plotWidth + rightAxisW + 8},${legFS})`);
+            if (legPos === "top" || legPos === "bottom") {
+                this.renderHLegend(legG, series, legFS, legFC, lb.w);
+            } else {
                 this.renderVLegend(legG, series, legFS, legFC);
             }
         }
@@ -961,27 +1060,26 @@ export class Visual implements IVisual {
     private renderHLegend(g: d3.Selection<SVGGElement, unknown, null, undefined>,
         series: SeriesInfo[], fs: number, fc: string, maxWidth: number) {
         let xOff = 0;
+        let row = 0;
+        const rowH = fs + 4;
         series.forEach(s => {
-            if (xOff >= maxWidth) return; // no room for more items
-            const item = g.append("g").classed("legend-item", true).attr("transform", `translate(${xOff},0)`);
+            const estItemW = 16 + s.name.length * fs * 0.55 + 30;
+            if (xOff + estItemW > maxWidth && xOff > 0) {
+                row++;
+                xOff = 0;
+            }
+            const item = g.append("g").classed("legend-item", true)
+                .attr("transform", `translate(${xOff},${row * rowH})`);
             if (s.type === "column") {
-                item.append("rect").attr("width", 12).attr("height", 12).attr("y", -10).attr("fill", s.color);
+                item.append("rect").attr("width", 10).attr("height", 10).attr("y", -1).attr("fill", s.color);
             } else {
-                item.append("line").attr("x1", 0).attr("x2", 12).attr("y1", -4).attr("y2", -4)
+                item.append("line").attr("x1", 0).attr("x2", 10).attr("y1", 4).attr("y2", 4)
                     .attr("stroke", s.color).attr("stroke-width", 2);
             }
-            const t = item.append("text").classed("legend-text", true).attr("x", 16).attr("y", 0)
+            const t = item.append("text").classed("legend-text", true).attr("x", 14).attr("y", fs * 0.8)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
             const textW = (t.node() as SVGTextElement).getComputedTextLength?.() || s.name.length * fs * 0.55;
-            // Truncate text if it would overflow the available width
-            const availW = maxWidth - xOff - 16;
-            if (availW < textW && availW > 0) {
-                // Approximate truncation
-                const ratio = availW / textW;
-                const truncLen = Math.max(1, Math.floor(s.name.length * ratio) - 1);
-                t.text(s.name.substring(0, truncLen) + "\u2026");
-            }
-            xOff += Math.min(textW, maxWidth - xOff) + 30;
+            xOff += textW + 28;
         });
     }
 
@@ -990,12 +1088,12 @@ export class Visual implements IVisual {
         series.forEach((s, i) => {
             const item = g.append("g").classed("legend-item", true).attr("transform", `translate(0,${i * (fs + 8)})`);
             if (s.type === "column") {
-                item.append("rect").attr("width", 10).attr("height", 10).attr("y", -8).attr("fill", s.color);
+                item.append("rect").attr("width", 10).attr("height", 10).attr("y", -1).attr("fill", s.color);
             } else {
-                item.append("line").attr("x1", 0).attr("x2", 10).attr("y1", -3).attr("y2", -3)
+                item.append("line").attr("x1", 0).attr("x2", 10).attr("y1", 4).attr("y2", 4)
                     .attr("stroke", s.color).attr("stroke-width", 2);
             }
-            item.append("text").classed("legend-text", true).attr("x", 14).attr("y", 0)
+            item.append("text").classed("legend-text", true).attr("x", 14).attr("y", fs * 0.8)
                 .style("font-size", `${fs}px`).style("fill", fc).text(s.name);
         });
     }
